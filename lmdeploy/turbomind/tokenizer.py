@@ -1,6 +1,6 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import os.path as osp
-from typing import Sequence, Union
+from typing import List, Sequence, Union
 
 import torch
 
@@ -60,6 +60,13 @@ class SentencePieceTokenizer:
         if isinstance(t, torch.Tensor):
             t = t.tolist()
         return self.model.Decode(t)
+
+    def decode_incrementally(self,
+                             prev_output_tokens: List[Union[str, int]],
+                             new_token_id: int,
+                             skip_special_tokens: bool = True):
+        prev_output_tokens.append(new_token_id)
+        return self.model.Decode(prev_output_tokens)
 
     def __call__(self, s: Union[str, Sequence[str]]):
         """Tokenize prompts.
@@ -142,6 +149,52 @@ class HuggingFaceTokenizer:
         skip_special_tokens = True
         return self.model.decode(t, skip_special_tokens=skip_special_tokens)
 
+    def decode_incrementally(self,
+                             prev_token_ids: Sequence[int],
+                             prev_output_tokens: List[str],
+                             new_token_id: int,
+                             skip_special_tokens: bool = True):
+        #
+        if skip_special_tokens and (new_token_id
+                                    in self.model.all_special_ids):
+            return None, prev_output_tokens
+        new_token = self.model.convert_ids_to_tokens(
+            new_token_id, skip_special_tokens=skip_special_tokens)
+        output_tokens = prev_output_tokens + [new_token]
+
+        # Convert the tokens to a string.
+        # Optimization: If the tokenizer does not have `added_tokens_encoder`,
+        # then we can directly use `convert_tokens_to_string`.
+        if not getattr(self.model, 'added_tokens_encoder', {}):
+            output_text = self.model.convert_tokens_to_string(output_tokens)
+            return new_token, output_text
+
+        # Adapted from
+        # https://github.com/huggingface/transformers/blob/v4.28.0/
+        # src/transformers/tokenization_utils.py#L921
+        # NOTE(woosuk): The following code is slow because it runs a for
+        # loop over the output_tokens. In Python, running a for loop over
+        # a list can be slow even when the loop body is very simple.
+        sub_texts = []
+        current_sub_text = []
+        for token in output_tokens:
+            if skip_special_tokens and token in self.model.all_special_tokens:
+                continue
+            if token in self.model.added_tokens_encoder:
+                if current_sub_text:
+                    sub_text = tokenizer.convert_tokens_to_string(
+                        current_sub_text)
+                    sub_texts.append(sub_text)
+                    current_sub_text = []
+                sub_texts.append(token)
+            else:
+                current_sub_text.append(token)
+        if current_sub_text:
+            sub_text = self.model.convert_tokens_to_string(current_sub_text)
+            sub_texts.append(sub_text)
+        output_text = ' '.join(sub_texts)
+        return new_token, output_text
+
     def __call__(self, s: Union[str, Sequence[str]]):
         """Tokenize prompts.
 
@@ -213,6 +266,24 @@ class Tokenizer:
         """
         return self.model.decode(t)
 
+    def decode_incrementally(self,
+                             prev_token_ids: Sequence[int],
+                             prev_output_tokens: List[str],
+                             new_token_id: int,
+                             skip_special_tokens: bool = True):
+        """Detokenizes the new token in conjunction with the previous output
+        tokens.
+
+        NOTE: This function does not update prev_output_tokens.
+
+        Returns:
+            new_token: The new token as a string.
+            output_text: The new output text as a string.
+        """
+        return self.model.decode_incrementally(prev_output_tokens,
+                                               new_token_id,
+                                               skip_special_tokens)
+
     def __call__(self, s: Union[str, Sequence[str]]):
         """Tokenize prompts.
 
@@ -222,3 +293,37 @@ class Tokenizer:
             list[int]: token ids
         """
         return self.model(s)
+
+
+if __name__ == '__main__':
+    # tokenizer_path = './llama-2-7b-chat/tokenizer.model'
+    tokenizer_path = '/nvme/shared_data/chatpjlm-0/llamav4.model'
+
+    tokenizer = Tokenizer(tokenizer_path)
+    token_ids = tokenizer.encode('hi, welcome to shanghai')
+    print(token_ids)
+
+    print('de-tokenize one by one >> ')
+    for i in range(len(token_ids)):
+        text = tokenizer.decode(token_ids[i])
+        print(text, end='', flush=True)
+    print()
+
+    print('de-tokenize all >>')
+    for i in range(len(token_ids)):
+        text = tokenizer.decode(token_ids[:i + 1])
+        print(text, flush=True)
+    print()
+
+    print('de-tokenize incrementally >>')
+    prev_token_ids = []
+    prev_token_texts = []
+    for i in range(len(token_ids)):
+        new_token, output_text = tokenizer.decode_incrementally(
+            prev_token_ids, prev_token_texts, token_ids[i])
+        if new_token is not None:
+            prev_token_texts.append(new_token)
+        prev_token_ids.append(token_ids[i])
+        print(f'output_text: {output_text}')
+        # print(f'new_token_id: {token_ids[i]}, new_token_text: {new_token}, '
+        #       f'output_text: {output_text}')
