@@ -62,11 +62,24 @@ class SentencePieceTokenizer:
         return self.model.Decode(t)
 
     def decode_incrementally(self,
-                             prev_output_tokens: List[Union[str, int]],
+                             prev_token_ids: Sequence[int],
+                             prev_token_texts: List[Union[str, int]],
                              new_token_id: int,
                              skip_special_tokens: bool = True):
-        prev_output_tokens.append(new_token_id)
-        return self.model.Decode(prev_output_tokens)
+        """Detokenizes the new token in conjunction with the previous output
+        tokens.
+
+        Args:
+            prev_token_ids (List[int]): a list of token_id of decoded token
+            prev_token_texts (List[str]): a list of string of decoded token
+            new_token_id (int): to be decoded token
+            skip_special_tokens (bool): indicator for skipping special tokens
+        Returns:
+            None: Compatible with `HuggingfaceTokenizer.decode_incrementally`
+            output_text: The new output text as a string.
+        """
+        _prev_token_ids = prev_token_ids + [new_token_id]
+        return None, self.model.Decode(_prev_token_ids)
 
     def __call__(self, s: Union[str, Sequence[str]]):
         """Tokenize prompts.
@@ -150,17 +163,31 @@ class HuggingFaceTokenizer:
         return self.model.decode(t, skip_special_tokens=skip_special_tokens)
 
     def decode_incrementally(self,
-                             prev_token_ids: Sequence[int],
-                             prev_output_tokens: List[str],
+                             prev_token_ids: List[int],
+                             prev_decoded_tokens: List[str],
                              new_token_id: int,
                              skip_special_tokens: bool = True):
-        #
+        """Detokenizes the new token in conjunction with the previous output
+        tokens.
+
+        Note: modify from vLLM's `decode_incrementally`
+
+        Args:
+            prev_token_ids (List[int]): a list of token_id of decoded token
+            prev_token_texts (List[str]): a list of string of decoded token
+            new_token_id (int): to be decoded token
+            skip_special_tokens (bool): indicator for skipping special tokens
+        Returns:
+            new_token: The new token as a string.
+            output_text: The new output text as a string.
+        """
+
         if skip_special_tokens and (new_token_id
                                     in self.model.all_special_ids):
-            return None, prev_output_tokens
+            return None, prev_decoded_tokens
         new_token = self.model.convert_ids_to_tokens(
             new_token_id, skip_special_tokens=skip_special_tokens)
-        output_tokens = prev_output_tokens + [new_token]
+        output_tokens = prev_decoded_tokens + [new_token]
 
         # Convert the tokens to a string.
         # Optimization: If the tokenizer does not have `added_tokens_encoder`,
@@ -267,21 +294,24 @@ class Tokenizer:
         return self.model.decode(t)
 
     def decode_incrementally(self,
-                             prev_token_ids: Sequence[int],
-                             prev_output_tokens: List[str],
+                             prev_token_ids: List[int],
+                             prev_token_texts: List[str],
                              new_token_id: int,
                              skip_special_tokens: bool = True):
         """Detokenizes the new token in conjunction with the previous output
         tokens.
 
-        NOTE: This function does not update prev_output_tokens.
-
+        Args:
+            prev_token_ids (List[int]): a list of token_id of decoded token
+            prev_token_texts (List[str]): a list of string of decoded token
+            new_token_id (int): to be decoded token
+            skip_special_tokens (bool): indicator for skipping special tokens
         Returns:
             new_token: The new token as a string.
             output_text: The new output text as a string.
         """
-        return self.model.decode_incrementally(prev_output_tokens,
-                                               new_token_id,
+        return self.model.decode_incrementally(prev_token_ids,
+                                               prev_token_texts, new_token_id,
                                                skip_special_tokens)
 
     def __call__(self, s: Union[str, Sequence[str]]):
@@ -296,11 +326,12 @@ class Tokenizer:
 
 
 if __name__ == '__main__':
-    # tokenizer_path = './llama-2-7b-chat/tokenizer.model'
-    tokenizer_path = '/nvme/shared_data/chatpjlm-0/llamav4.model'
+    # tokenizer_path = './workspace/internlm-chat-7b/tokenizer.model'
+    # tokenizer_path = './workspace/llama-2-7b-chat/tokenizer.model'
+    tokenizer_path = './workspace/puyu/llamav4.model'
 
     tokenizer = Tokenizer(tokenizer_path)
-    token_ids = tokenizer.encode('hi, welcome to shanghai')
+    token_ids = tokenizer.encode('hi, welcome to shanghai. 欢迎来上海')
     print(token_ids)
 
     print('de-tokenize one by one >> ')
@@ -324,6 +355,4 @@ if __name__ == '__main__':
         if new_token is not None:
             prev_token_texts.append(new_token)
         prev_token_ids.append(token_ids[i])
-        print(f'output_text: {output_text}')
-        # print(f'new_token_id: {token_ids[i]}, new_token_text: {new_token}, '
-        #       f'output_text: {output_text}')
+        print(f'{output_text}')
