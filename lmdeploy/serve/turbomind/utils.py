@@ -8,6 +8,7 @@ from tritonclient.utils import np_to_triton_dtype
 
 def prepare_tensor(name, input_tensor):
     """Create grpcclient's InferInput instance according to a given tensor."""
+    print(name, input_tensor.shape)
     t = grpcclient.InferInput(name, list(input_tensor.shape),
                               np_to_triton_dtype(input_tensor.dtype))
     t.set_data_from_numpy(input_tensor)
@@ -76,25 +77,32 @@ class Postprocessor:
     def __call__(self, *args, **kwargs):
         return self.infer(*args, **kwargs)
 
-    def infer(self, output_ids: np.ndarray, seqlen: np.ndarray):
+    def infer(self, prev_token_ids: np.ndarray, prev_token_texts: np.ndarray,
+              token_ids: np.ndarray):
         """De-tokenize tokens for text.
 
         Args:
-            output_ids(np.ndarray): tokens' id
-            seqlen(np.ndarray): sequence length
+            prev_token_ids(np.ndarray): an array of token_id of
+                previously decoded tokens
+            prev_token_texts(np.ndarray): an array of string of
+                previously decoded tokens
+            token_ids(np.ndarray): an array of to-be-decoded tokens
 
         Returns:
-            str: decoded tokens
+            new_token_text: The new token as a string.
+            output_text: The new output text as a string.
         """
         inputs = [
-            prepare_tensor('TOKENS_BATCH', output_ids),
-            prepare_tensor('sequence_length', seqlen)
+            prepare_tensor('prev_token_ids', prev_token_ids),
+            prepare_tensor('prev_token_texts', prev_token_texts),
+            prepare_tensor('token_ids', token_ids)
         ]
-        inputs[0].set_data_from_numpy(output_ids)
-        inputs[1].set_data_from_numpy(seqlen)
+
         model_name = 'postprocessing'
         with grpcclient.InferenceServerClient(self.tritonserver_addr) \
                 as client:
             result = client.infer(model_name, inputs)
-            output0 = result.as_numpy('OUTPUT')
-        return output0
+            new_token_text = result[0].as_numpy('new_token_text')
+            output_text = result[1].as_numpy('output_text')
+
+        return new_token_text, output_text

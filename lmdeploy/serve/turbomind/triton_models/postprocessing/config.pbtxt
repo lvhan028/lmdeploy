@@ -3,27 +3,37 @@ backend: "python"
 max_batch_size: 1
 input [
   {
-    name: "TOKENS_BATCH"
-    data_type: TYPE_UINT32
-    dims: [ -1, -1 ]
-  },
-  {
-    name: "sequence_length"
+    name: "prev_token_ids"
     data_type: TYPE_UINT32
     dims: [ -1 ]
+  },
+  {
+    name: "prev_token_texts"
+    data_type: TYPE_STRING
+    dims: [ -1 ]
+  },
+  {
+    name: "token_ids"
+    data_type: TYPE_UINT32
+    dims: [-1]
   }
 ]
 output [
   {
-    name: "OUTPUT"
+    name: "new_token_text"
     data_type: TYPE_STRING
-    dims: [ -1, -1 ]
+    dims: [ -1 ]
+  },
+  {
+    name: "output_text"
+    data_type: TYPE_STRING
+    dims: [ -1 ]
   }
 ]
 
 instance_group [
     {
-        count: 1
+        count: 16
         kind: KIND_CPU
     }
 ]

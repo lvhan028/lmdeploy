@@ -41,7 +41,7 @@ class TritonPythonModel:
 
         # Parse model output configs
         output_config = pb_utils.get_output_config_by_name(
-            model_config, 'OUTPUT')
+            model_config, 'new_token_text')
 
         # Convert Triton types to numpy types
         self.output_dtype = pb_utils.triton_string_to_numpy(
@@ -80,21 +80,33 @@ class TritonPythonModel:
         # and create a pb_utils.InferenceResponse for each of them.
         for idx, request in enumerate(requests):
             # Get input tensors
-            tokens_batch = pb_utils.get_input_tensor_by_name(
-                request, 'TOKENS_BATCH').as_numpy()
-            sequence_length = pb_utils.get_input_tensor_by_name(
-                request, 'sequence_length').as_numpy()
+            prev_token_ids = pb_utils.get_input_tensor_by_name(
+                request, 'prev_token_ids').as_numpy().flatten().tolist()
+            prev_token_texts = pb_utils.get_input_tensor_by_name(
+                request, 'prev_token_texts').as_numpy().flatten().tolist()
+            token_ids = pb_utils.get_input_tensor_by_name(
+                request, 'token_ids').as_numpy().flatten().tolist()
+
+            print(prev_token_ids, prev_token_texts, token_ids)
+
+            prev_token_texts = [
+                token_text.decode('utf-8') for token_text in prev_token_texts
+            ]
+
+            print(prev_token_ids, prev_token_texts, token_ids)
 
             # Postprocessing output data.
-            outputs = self._postprocessing(tokens_batch.tolist(),
-                                           sequence_length)
+            new_token_text, output_text = self._postprocessing(
+                prev_token_ids, prev_token_texts, token_ids)
 
             # Create output tensors. You need pb_utils.Tensor
             # objects to create pb_utils.InferenceResponse.
-            output_tensor = pb_utils.Tensor(
-                'OUTPUT',
-                np.array(outputs).astype(self.output_dtype))
-
+            new_token_text = pb_utils.Tensor(
+                'new_token_text',
+                np.array(new_token_text).astype(self.output_dtype))
+            output_text = pb_utils.Tensor(
+                'output_text',
+                np.array(output_text).astype(self.output_dtype))
             # Create InferenceResponse. You can set an error here in case
             # there was a problem with handling this inference request.
             # Below is an example of how you can set errors in inference
@@ -103,7 +115,7 @@ class TritonPythonModel:
             # pb_utils.InferenceResponse(
             #    output_tensors=..., TritonError("An error occurred"))
             inference_response = pb_utils.InferenceResponse(
-                output_tensors=[output_tensor])
+                output_tensors=[new_token_text, output_text])
             responses.append(inference_response)
 
         # You should return a list of pb_utils.InferenceResponse. Length
@@ -118,12 +130,23 @@ class TritonPythonModel:
         """
         print('Cleaning up...')
 
-    def _postprocessing(self, tokens_batch, sequence_length):
+    def _postprocessing(self, prev_token_ids, prev_token_texts, new_token_ids):
         """decode token ids into texts."""
-        outputs = []
-        for beam_tokens, beam_len in zip(tokens_batch, sequence_length):
-            for tokens, _len in zip(beam_tokens, beam_len):
-                output = self.tokenizer.decode(tokens[:_len])
-                output = output.encode('utf8')
-                outputs.append(output)
-        return outputs
+
+        for new_token_id in new_token_ids:
+            new_token, output_text = self.tokenizer.decode_incrementally(
+                prev_token_ids, prev_token_texts, new_token_id)
+            if new_token is not None:
+                prev_token_texts.append(new_token)
+            prev_token_ids.append(new_token_id)
+
+        # print(f'{new_token}')
+        return [new_token], [output_text]
+        # for prev_token_ids, prev_token_texts, new_token_id in zip(
+        #         prev_token_batch, prev_token_text_batch, new_token_batch):
+        #     new_token, output_text = self.tokenizer.decode_incrementally(
+        #         prev_token_ids,
+        #         prev_token_texts,
+        #         new_token_id)
+        #     outputs.append((new_token, output_text))
+        # return outputs
