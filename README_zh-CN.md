@@ -18,7 +18,7 @@
 
 ______________________________________________________________________
 
-## 更新 🎉
+## 最新进展 🎉
 
 - \[2023/11\] Turbomind 支持直接读取 Huggingface 模型。点击[这里](./docs/en/load_hf.md)查看使用方法
 - \[2023/11\] TurboMind 重磅升级。包括：Paged Attention、更快的且不受序列最大长度限制的 attention kernel、2+倍快的 KV8 kernels、Split-K decoding (Flash Decoding) 和 支持 sm_75 架构的 W4A16
@@ -38,67 +38,81 @@ ______________________________________________________________________
 
 ______________________________________________________________________
 
-## 简介
+# 简介
 
 LMDeploy 由 [MMDeploy](https://github.com/open-mmlab/mmdeploy) 和 [MMRazor](https://github.com/open-mmlab/mmrazor) 团队联合开发，是涵盖了 LLM 任务的全套轻量化、部署和服务解决方案。
 这个强大的工具箱提供以下核心功能：
 
-- **高效推理引擎 TurboMind**：基于 [FasterTransformer](https://github.com/NVIDIA/FasterTransformer)，我们实现了高效推理引擎 TurboMind，支持 InternLM、LLaMA、vicuna等模型在 NVIDIA GPU 上的推理。
+- **高效推理引擎 TurboMind**：通过 Block K/V Cache, 高效的计算 kernel，Dynamic Split&Fuse 和 Persistent Batch，LMDeploy 实现了高效推理引擎 TurboMind，支持 InternLM、LLaMA、vicuna等模型在 NVIDIA GPU 上的推理。
+
+<!-- - 基于 [FasterTransformer](https://github.com/NVIDIA/FasterTransformer)，我们实现了高效推理引擎 TurboMind，支持 InternLM、LLaMA、vicuna等模型在 NVIDIA GPU 上的推理。 -->
 
 - **交互推理方式**：通过缓存多轮对话过程中 attention 的 k/v，记住对话历史，从而避免重复处理历史会话。
 
 - **多 GPU 部署和量化**：我们提供了全面的模型部署和量化支持，已在不同规模上完成验证。
 
-- **persistent batch 推理**：进一步优化模型执行效率。
+<!-- - **persistent batch 推理**：进一步优化模型执行效率。 -->
 
-  ![PersistentBatchInference](https://github.com/InternLM/lmdeploy/assets/67539920/e3876167-0671-44fc-ac52-5a0f9382493e)
+**给出架构图，persistent-batch的图放在turbomind.md中。在pytorch合入之后吧**
 
-## 支持的模型
+<!-- ![PersistentBatchInference](https://github.com/InternLM/lmdeploy/assets/67539920/e3876167-0671-44fc-ac52-5a0f9382493e) -->
 
-`LMDeploy` 支持 `TurboMind` 和 `Pytorch` 两种推理后端。运行`lmdeploy list`可查看支持模型列表
+# 性能
 
-### TurboMind
+## 请求处理性能(req/min)
 
-> **Note**<br />
-> W4A16 推理需要 Ampere 及以上架构的 Nvidia GPU
+lmdeploy(turbomind) v.s. vLLM
+llama2-7b, llama2-13b, llama2-30b(or internlm-20b), llama2-70b
 
-|     模型     | 模型并行 | FP16 | KV INT8 | W4A16 | W8A8 |
-| :----------: | :------: | :--: | :-----: | :---: | :--: |
-|    Llama     |   Yes    | Yes  |   Yes   |  Yes  |  No  |
-|    Llama2    |   Yes    | Yes  |   Yes   |  Yes  |  No  |
-|    SOLAR     |   Yes    | Yes  |   Yes   |  Yes  |  No  |
-| InternLM-7B  |   Yes    | Yes  |   Yes   |  Yes  |  No  |
-| InternLM-20B |   Yes    | Yes  |   Yes   |  Yes  |  No  |
-|   QWen-7B    |   Yes    | Yes  |   Yes   |  Yes  |  No  |
-|   QWen-14B   |   Yes    | Yes  |   Yes   |  Yes  |  No  |
-| Baichuan-7B  |   Yes    | Yes  |   Yes   |  Yes  |  No  |
-| Baichuan2-7B |   Yes    | Yes  |   Yes   |  Yes  |  No  |
-|  Code Llama  |   Yes    | Yes  |   No    |  No   |  No  |
+## 静态推理性能(out tok/s)
 
-### Pytorch
+lmdeploy(turbomind) v.s. tensorrt-llm
 
-|    模型     | 模型并行 | FP16 | KV INT8 | W4A16 | W8A8 |
-| :---------: | :------: | :--: | :-----: | :---: | :--: |
-|    Llama    |   Yes    | Yes  |   No    |  No   |  No  |
-|   Llama2    |   Yes    | Yes  |   No    |  No   |  No  |
-| InternLM-7B |   Yes    | Yes  |   No    |  No   |  No  |
+更多设备上的benchmark，请阅读以下链接：
 
-## 性能
+- [Geforce 2080](<>)
+- [Geforce RTX 3090](<>)
+- [Geforce RTX 4090](<>)
 
-**场景一**: 固定的输入、输出token数（1,2048），测试 output token throughput
+# 支持的模型
 
-**场景二**: 使用真实数据，测试 request throughput
+`LMDeploy` 有 `TurboMind` 和 `PyTorch` 两种推理后端。不同的推理后端在支持的模型类别、计算精度方面有所差别。用户可根据实际需求选择合适的推理引擎
 
-测试配置：LLaMA-7B, NVIDIA A100(80G)
+## TurboMind 支持的模型
 
-TurboMind 的 output token throughput 超过 2000 token/s, 整体比 DeepSpeed 提升约 5% - 15%，比 huggingface transformers 提升 2.3 倍
-在 request throughput 指标上，TurboMind 的效率比 vLLM 高 30%
+|        模型        | 模型规模 | FP16/BF16 | KV INT8 | W4A16 |
+| :----------------: | :------: | :-------: | :-----: | :---: |
+|       Llama        |  7B-65B  |    Yes    |   Yes   |  Yes  |
+|       Llama2       | 7B - 70B |    Yes    |   Yes   |  Yes  |
+|      InternLM      | 7B - 20B |    Yes    |   Yes   |  Yes  |
+| InternLM-XComposer |    7B    |    Yes    |   Yes   |  Yes  |
+|        QWen        |  7B-72B  |    Yes    |   Yes   |  Yes  |
+|      QWen-VL       |    7B    |    Yes    |   Yes   |  Yes  |
+|      Baichuan      |    7B    |    Yes    |   Yes   |  Yes  |
+|     Baichuan2      |    7B    |    Yes    |   Yes   |  Yes  |
+|     Code Llama     | 7B - 34B |    Yes    |   No    |  No   |
 
-![benchmark](https://github.com/InternLM/lmdeploy/assets/4560679/7775c518-608e-4e5b-be73-7645a444e774)
+### PyTorch 支持的模型
 
-## 快速上手
+|    模型     | 模型规模 | FP16/BF16 | KV INT8 | W8A8 |
+| :---------: | :------: | :-------: | :-----: | :--: |
+|    Llama    |   Yes    |    Yes    |   No    |  No  |
+|   Llama2    |   Yes    |    Yes    |   No    |  No  |
+| InternLM-7B |   Yes    |    Yes    |   No    |  No  |
 
-### 安装
+# 快速上手
+
+LMDeploy提供了快速安装、模型量化、离线批处理、在线推理服务等功能。每个功能只需简单的几行行代码或者命令就可以完成
+
+<!-- toc -->
+
+- [安装](#安装)
+- [离线批处理](#离线批处理)
+- [推理服务](#推理服务)
+
+<!-- tocstop -->
+
+## 安装
 
 使用 pip ( python 3.8+) 安装 LMDeploy，或者[源码安装](./docs/zh_cn/build.md)
 
@@ -106,44 +120,106 @@ TurboMind 的 output token throughput 超过 2000 token/s, 整体比 DeepSpeed �
 pip install lmdeploy
 ```
 
-> **Note**<br />
-> `pip install lmdeploy`默认安装runtime依赖包，使用lmdeploy的lite和serve功能时，用户需要安装额外依赖包。例如: `pip install lmdeploy[lite]` 会额外安装`lmdeploy.lite`模块的依赖包
->
-> - `all`: 安装`lmdeploy`所有依赖包，具体可查看`requirements.txt`
-> - `lite`: 额外安装`lmdeploy.lite`模块的依赖包，具体可查看`requirements/lite.txt`
-> - `serve`: 额外安装`lmdeploy.serve`模块的依赖包，具体可查看`requirements/serve.txt`
+## 离线推理
 
-### 部署 InternLM
+<!-- 这段最终是要体现使用统一的接口，用不同的后端来进行推理 -->
 
-使用 TurboMind 推理模型需要先将模型转化为 TurboMind 的格式，目前支持在线转换和离线转换两种形式。在线转换可以直接加载 Huggingface 模型，离线转换需需要先保存模型再加载。
+<!-- 统一了之后，改成离线批处理-->
 
-下面以 [internlm/internlm-chat-7b](https://huggingface.co/internlm/internlm-chat-7b) 为例，展示在线转换的使用方式。其他方式可参考[load_hf.md](docs/zh_cn/load_hf.md)
+<!-- ```
+import lmdeploy
 
-#### 使用 turbomind 推理
+pipe = lmdeploy.pipeline("InternLM/internlm-chat-7b", backend="turbomind", tp=1)
+response = pipe(["Hi, pls intro yourself", "Shanghai is"])
+print(response)
+```
+如需使用 pytorch 引擎，`backend` 改成 `pytorch` 即可。支持多卡并行处理，只用修改`tp`参数。pipeline 更详细的介绍，请参考[这里]()。 -->
+
+<!-- pipeline 部分的文档，主要是来介绍参数等 -->
+
+### TurboMind 推理
 
 ```shell
-lmdeploy chat turbomind internlm/internlm-chat-7b --model-name internlm-chat-7b
+
 ```
 
-> **Note**<br /> internlm/internlm-chat-7b 会自动下载到 `.cache` 文件夹，这里也可以传下载好的路径。
+<!-- 使用 TurboMind 推理模型需要先将模型转化为 TurboMind 的格式，目前支持在线转换和离线转换两种形式。在线转换可以直接加载 Huggingface 模型，离线转换需需要先保存模型再加载。
+
+下面以 [internlm/internlm-chat-7b](https://huggingface.co/internlm/internlm-chat-7b) 为例，展示在线转换的使用方式。其他方式可参考[load_hf.md](docs/zh_cn/load_hf.md) -->
+
+<!-- > **Note**<br /> internlm/internlm-chat-7b 会自动下载到 `.cache` 文件夹，这里也可以传下载好的路径。
 
 > **Note**<br />
 > turbomind 在使用 FP16 精度推理 InternLM-7B 模型时，显存开销至少需要 15.7G。建议使用 3090, V100，A100等型号的显卡。<br />
 > 关闭显卡的 ECC 可以腾出 10% 显存，执行 `sudo nvidia-smi --ecc-config=0` 重启系统生效。
 
 > **Note**<br />
-> 使用 Tensor 并发可以利用多张 GPU 进行推理。在 `chat` 时添加参数 `--tp=<num_gpu>` 可以启动运行时 TP。
+> 使用 Tensor 并发可以利用多张 GPU 进行推理。在 `chat` 时添加参数 `--tp=<num_gpu>` 可以启动运行时 TP。 -->
 
-#### 启动 gradio server
+更过关于 turbomind 的介绍，请参考[](<>)
+
+### PyTorch 推理
+
+## 推理服务
+
+LMDeploy 支持把模型一键封装为推理服务。对外提供的 RESTful API 兼容 openai 的接口。请阅读[这里](<>)了解各接口的定义和使用方法。以下为服务启动和请求处理的示例：
 
 ```shell
-# 安装lmdeploy额外依赖
-pip install lmdeploy[serve]
+# 启动服务
+lmdeploy serve api_server InternLM/internlm-chat-7b --backend turbomind --tp 1
+# 通过客户端，发送请求和接收结果
+lmdeploy serve api_client http://0.0.0.0:23333
+```
 
+## 模型量化
+
+### 权重 INT4 量化
+
+只用两行命令，就可以把一个 LLM 模型量化为 4bit 权重，并在控制台与模型进行交互式对话。
+
+```shell
+lmdeploy lite auto_awq InternLM/internlm-chat-7b --work-dir ./internlm-chat-7b-4bit
+lmdeploy chat turbomind ./internlm-chat-7b-4bit --model-format awq --group-size 128
+```
+
+LMDeploy 4bit 量化和推理支持的显卡包括：
+
+- 图灵架构（sm75）：20系列、T4
+- 安培架构（sm80,sm86）：30系列、A10、A16、A30、A100
+- Ada Lovelace架构（sm90）：40 系列
+
+量化模型在各型号显卡上的推理速度可以从[这里](<>)找到。
+
+### KV Cache INT8 量化
+
+<!-- [点击这里](./docs/zh_cn/kv_int8.md) 查看 kv int8 使用方法、实现公式和测试结果。 -->
+
+## 好用的工具
+
+LMDeploy 了
+
+### 控制台交互式对话
+
+```shell
+lmdeploy chat turbomind internlm/internlm-chat-7b --model-name internlm-chat-7b
+```
+
+***贴一张图***
+
+### WebUI 交互式对话
+
+LMDeploy 使用 gradio 开发了在线对话 demo。
+
+```shell
+# 安装依赖
+pip install lmdeploy[serve]
+# 启动
 lmdeploy serve gradio internlm/internlm-chat-7b --model-name internlm-chat-7b
 ```
 
 ![](https://github.com/InternLM/lmdeploy/assets/67539920/08d1e6f2-3767-44d5-8654-c85767cec2ab)
+
+### 模型精度和速度评测工具
 
 #### 通过 Restful API 部署服务
 
@@ -203,9 +279,9 @@ deepspeed --module --num_gpus 2 lmdeploy.pytorch.chat \
     --seed 0
 ```
 
-## 量化部署
+<!-- ## 量化部署 -->
 
-#### 权重 INT4 量化
+<!-- #### 权重 INT4 量化
 
 LMDeploy 使用 [AWQ](https://arxiv.org/abs/2306.00978) 算法对模型权重进行量化
 
@@ -216,7 +292,7 @@ LMDeploy 使用 [AWQ](https://arxiv.org/abs/2306.00978) 算法对模型权重进
 [点击这里](./docs/zh_cn/kv_int8.md) 查看 kv int8 使用方法、实现公式和测试结果。
 
 > **Warning**<br />
-> 量化部署不支持运行时 Tensor 并发。如果希望使用 Tensor 并发，需要在 deploy 时配置 tp 参数。
+> 量化部署不支持运行时 Tensor 并发。如果希望使用 Tensor 并发，需要在 deploy 时配置 tp 参数。 -->
 
 ## 贡献指南
 
