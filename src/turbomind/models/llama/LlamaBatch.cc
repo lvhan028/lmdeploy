@@ -218,33 +218,40 @@ auto LlamaBatch<T>::ProcessStopRequests(const Requests& requests) -> std::vector
     return signals;
 }
 
+/**
+ * \brief 处理推理请求。根据requests，更新 BatchState。如果是一个新的序列，还要创还能对应的Sequence
+ * \param [in] requests 推理请求
+*/
 template<typename T>
 void LlamaBatch<T>::ProcessInferRequests(const Requests& requests)
 {
     NvtxScope scope("infer_request");
-    auto&     state = *incoming_;
+    auto&     state = *incoming_;   // ++ lvhan(23.12.25): 更新 BatchState `incoming_`
 
     FT_CHECK(state.size == 0);
     FT_CHECK(state.active_size == 0);
 
-    std::vector<int> existing_idx;
+    std::vector<int> existing_idx;  // requests 中哪些
 
-    int idx = 0;
+    int idx = 0; // 从0自增，直到 requests.size()
     for (const auto& r : requests) {
         FT_CHECK(!state.requests[idx]);
 
         if (rank_ == 0) {
             TM_LOG_WARNING("[ProcessInferRequests] Request for %ld received.", (long)r->id);
         }
-
+        // 请求加入到 BatchState的requests数组中
         state.requests[idx] = r;
 
         // get sequence for the request
+        // request是sequence的第一个请求时，通过 sequence_manager 创建一个序列
+        // 否则的话，从 sequence_manager 中获取这个request对应的sequence
         state.sequences[idx] = r->start_flag ? sequence_manager_->Create(r->id) : sequence_manager_->Get(r->id);
         FT_CHECK(state.sequences[idx]);
 
         auto& seq = *state.sequences[idx];
 
+        // 当 r 中 step >= 0 时，也就是历史tokens中的游标 step >= 0，调整 seq.tokens的buffer大小，以及 seq 的 cache_len
         if (int step = r->inputs[rank_].getVal<int>("step", -1); step >= 0) {
             if (step <= seq.tokens.size()) {
                 seq.tokens.resize(step);
@@ -264,12 +271,12 @@ void LlamaBatch<T>::ProcessInferRequests(const Requests& requests)
         const auto output_ids_base = state.output_ids + session_len_ * idx;
         auto       output_ids      = output_ids_base;
 
-        // copy history tokens
+        // copy history tokens to output buffer `ouput_ids`
         if (!seq.tokens.empty()) {
             output_ids = Copy(seq.tokens.data(), seq.tokens.size(), output_ids);
         }
 
-        // copy input tokens
+        // copy input tokens to output buffer `output_ids`
         if (input_length) {
             output_ids = Copy(input_ids, input_length, output_ids);
         }
@@ -397,8 +404,9 @@ void LlamaBatch<T>::ProcessInferRequests(const Requests& requests)
         idx++;
     }
 
-    state.size = idx;
+    state.size = idx;   // 更新 BatchState `incoming_` 中 batch 的大小
 
+    // ++ lvhan(skip)(23.12.25) 暂时先略过去
     // when there are new sequences
     if (state.size != existing_idx.size()) {
         // copy random seeds to device
@@ -448,15 +456,19 @@ void LlamaBatch<T>::AdjustMaxInputCount(GenerationState&                    g,
     g.max_input_count2 = std::min(input_count + extra_tokens_per_iter_, max_context_token_num_);
 }
 
+/**
+ * \brief 初始化 xxx
+ * \param [in, out] g
+*/
 template<typename T>
 void LlamaBatch<T>::Initialize(GenerationState& g)
 {
     NvtxScope                                scope("initialize");
-    std::vector<const Sequence*>             sequences;
-    std::vector<Sequence::Status>            status;
-    std::vector<uint64_t>                    priorities;
-    std::vector<int>                         context_lengths;
-    std::vector<std::pair<BatchState*, int>> coords;
+    std::vector<const Sequence*>             sequences;         //state_, incoming_ 的所有序列
+    std::vector<Sequence::Status>            status;            //state_, incoming_ 的所有序列的状态
+    std::vector<uint64_t>                    priorities;        //state_, incoming_ 的所有请求的优先级
+    std::vector<int>                         context_lengths;   //state_, incoming_ 的请求的context_length
+    std::vector<std::pair<BatchState*, int>> coords;            //汇总 state_, incoming_ requests的下标
 
     // count the holes introduced by finished requests in from previous iteration or stop requests from
     // current iteration
@@ -1264,9 +1276,9 @@ void LlamaBatch<T>::InternalThreadEntry(int device_id)
     // TM_LOG_INFO("[InternalThreadEntry] %d", (int)rank_);
     check_cuda_error(cudaSetDevice(device_id));
 
-    auto& shared_state = model_->shared_state_;
+    auto& shared_state = model_->shared_state_; // 各 rank 共享的状态参数
 
-    auto& request_queue  = shared_state->request_queue;
+    auto& request_queue  = shared_state->request_queue; // LlamaV2<T>::forward 会往 queue 中加入request
     auto& infer_requests = shared_state->infer_requests;
     auto& stop_requests  = shared_state->stop_requests;
 
@@ -1281,6 +1293,9 @@ void LlamaBatch<T>::InternalThreadEntry(int device_id)
             const bool is_empty        = (free_slot_count == max_batch_size_);
             stop_requests.clear();
             infer_requests.clear();
+            // ++lvhan(23.12.25) `request_counter % request_interval == 0 is ALWAYS true
+            // 当没有空闲槽位时，dequeue会被block。
+            // 当有时，最多取 `free_slot_count`的请求
             if (is_empty || request_counter % request_interval == 0) {
                 // Block if batch is empty
                 request_queue.dequeue(stop_requests, infer_requests, free_slot_count, is_empty, shared_state->abort);
@@ -1300,6 +1315,7 @@ void LlamaBatch<T>::InternalThreadEntry(int device_id)
             return;
         }
 
+        // ++ lvhan(23.12.25) 先略过这个函数
         auto signals = ProcessStopRequests(stop_requests);
 
         // Shared `priority` field will be assigned by rank-0
@@ -1308,6 +1324,7 @@ void LlamaBatch<T>::InternalThreadEntry(int device_id)
         // Wait while shared `requests` is being used
         shared_state->barrier->wait();
 
+        // ++ lvhan(23.12.25) 先略过这个函数，signals 和 ProcessStopRequests有关
         SendSignals(std::move(signals));
 
         Initialize(g);

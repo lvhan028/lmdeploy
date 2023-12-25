@@ -42,12 +42,13 @@ namespace turbomind {
 template<typename T>
 class LlamaV2 {
 public:
+    // 各 rank 共享的推理请求
     struct SharedState {
-        std::vector<std::shared_ptr<Request>> infer_requests;
-        std::vector<std::shared_ptr<Request>> stop_requests;
-        RequestQueue                          request_queue;
-        std::shared_ptr<Barrier>              barrier;
-        bool                                  abort;
+        std::vector<std::shared_ptr<Request>> infer_requests;    // 推理的request
+        std::vector<std::shared_ptr<Request>> stop_requests;     // 停止推理的request
+        RequestQueue                          request_queue;     // 请求队列
+        std::shared_ptr<Barrier>              barrier;           // 各 rank 同步用的，在 LLamaTritonModel 的 construtor中创建
+        bool                                  abort;             //
     };
 
     ~LlamaV2();
@@ -189,7 +190,7 @@ private:
     std::unique_ptr<UnifiedDecoder<T>> unified_decoder_;
     DynamicDecodeLayer<float>*         dynamic_decode_layer_{};
 
-    std::shared_ptr<SharedState>   shared_state_;
+    std::shared_ptr<SharedState>   shared_state_;    // 各 rank 共享的推理请求
     ffi_api_lock_ctrl_t            ffi_lock_;
     std::unique_ptr<LlamaBatch<T>> batch_;
 };

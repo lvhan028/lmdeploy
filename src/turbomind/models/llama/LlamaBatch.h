@@ -20,23 +20,23 @@
 namespace turbomind {
 
 struct BatchState {
-    int*  h_context_length;
-    bool* h_finished;
+    int*  h_context_length;         // batch里每个请求的context length。初始值 history + input
+    bool* h_finished;               // batch里每个请求是否已经推理结束。初始值 false
 
     curandState_t* curand_state;
-    int*           output_ids;  // output ids in [B, S]
+    int*           output_ids;      // output ids in [B, S]
 
-    float* h_rope_theta;
+    float* h_rope_theta;            // batch里每个请求的 rope_theta
 
-    std::vector<int> seq_len_limit;
+    std::vector<int> seq_len_limit; // batch 中每个序列的最大长度：history + input_ids + request_output_len
 
     std::vector<const Sequence*>          sequences;
-    std::vector<std::shared_ptr<Request>> requests;
+    std::vector<std::shared_ptr<Request>> requests;     // 一个batch中的所有请求
 
     // |<-- existing -->|<-- swap-in -->|
     // |<----------- active ----------->|<-- inactive -->|
     int active_size;
-    int size;
+    int size;   // 一个 batch 的大小。LLamaBatch::ProcessInferRequests 会更新它
 };
 
 template<typename T>
@@ -65,8 +65,21 @@ struct GenerationState {
 template<typename T>
 class LlamaBatch {
 public:
+    /**
+     * \brief allocate buffer like `context_decoder_input_buf_`, `context_decoder_output_buf_` and so on
+    */
     void AllocateBuffer(size_t batch_size, size_t session_len);
+    /**
+     * \brief allocate persistent buffer, such as `stop_words`, `bad_words` and etc, most of
+     * which are used for token sampling
+     * \param [int] max_batch_size the max size of a batch
+     * \note AllocateBuffer and AllocatePersistantBuffer are invoked in LlamaBatch constructor at the same time with
+     * the same parameter `max_batch_size`, why not put them together in ONE function
+    */
     void AllocatePersistantBuffer(size_t max_batch_size);
+    /**
+     * \brief free buffers allocated in `AllocateBuffer` and `AllocatePersistantBuffer`
+    */
     void FreeBuffer();
 
     using Requests = std::vector<std::shared_ptr<Request>>;
@@ -82,6 +95,10 @@ public:
                              const std::vector<const Sequence*>& sequences,
                              const std::vector<int>&             context_length);
 
+    /**
+     * \brief initialize a struct `g` that is used during prefill and decode
+     * \param  [in, out] g a
+    */
     void Initialize(GenerationState& g);
 
     void InitializeSampling(const GenerationState& g);
@@ -116,9 +133,21 @@ public:
         FreeBuffer();
     }
 
+    /**
+     * \brief start a working thread for processing request, and a working thread for output result.
+     * The former thread's entry point is `InternalThreadEntry`. The latter thread's entry is `OutputThreadEntry`.
+     * Each device will launch a thread to process request, only device with rank 0 possess the output thread
+    */
     void Start();
 
 private:
+    /**
+     * \brief the entry point of a working thread to process request. This thread is persistent thread.
+     * rank 0 thread 负责从 request queue中获取request。如果当前没有空的batch slot，获取会阻塞。否则的话，
+     * 就从 request_queue中，把所有的stop请求都取出来，然后再取出来free_batch_slot个推理请求
+     * according to the request's flag
+     * \param [in] device_id the rank of the device
+    */
     void InternalThreadEntry(int device_id);
 
     void OutputThreadEntry();
@@ -263,11 +292,11 @@ private:
 
     std::array<BatchState, 3> states_{};
 
-    BatchState* state_{};
+    BatchState* state_{};       // 当前处理的 request 组 batch 的状态
     BatchState* back_{};
-    BatchState* incoming_{};
+    BatchState* incoming_{};    // 新来的 request 组 batch 的状态
 
-    uint64_t request_count_{0};
+    uint64_t request_count_{0}; // 请求次数，递增。用来给 Request::unique_id 赋值
 
     // hard limits for persistent buffers
     static constexpr int kMaxStopBadWordsLen = 32;

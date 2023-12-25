@@ -85,6 +85,14 @@ public:
 
     using AdjustInputCount = std::function<std::pair<int, int>(const Sequences&, const std::vector<int>&)>;
 
+    /**
+     * @param sequences:
+     * @param context_lengths
+     * @param priorities
+     * @param step_length
+     * @param adjust
+     * @return
+    */
     [[nodiscard]] Outcome Materialize(Sequences                    sequences,
                                       std::vector<int>             context_lengths,
                                       const std::vector<uint64_t>& priorities,

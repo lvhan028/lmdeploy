@@ -62,6 +62,9 @@ bool SequenceManager::Contains(uint64_t id)
     return sequences_.find(id) != sequences_.end();
 }
 
+/**
+ * \param it [in, out]
+*/
 void SequenceManager::Erase(std::map<uint64_t, Sequence>::iterator& it)
 {
     auto& seq = it->second;
