@@ -57,10 +57,10 @@ inline bool is_free(const Block& block)
 }
 
 struct Snapshot {
-    int              active;
+    int              active;    //
     int              cached;
     int              free;
-    std::vector<int> use_count;
+    std::vector<int> use_count; // blocks_ 中，每个 active block 被多少个 active sequences使用
 };
 
 class BlockManager {

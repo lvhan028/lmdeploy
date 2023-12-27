@@ -178,6 +178,10 @@ void BlockManager::Free(BlockIds ids)
     Move(cached_ids_, ids, free_ids_);
 }
 
+/**
+ * \brief
+ * \param [in] ids 被 sequencemgr unlock 的 blocks。被 unlock 的 block 状态必须是被 active sequence 用的 block
+*/
 int BlockManager::Unlock(const BlockIds& ids)
 {
     BlockIds unlock;
@@ -193,13 +197,17 @@ int BlockManager::Unlock(const BlockIds& ids)
     }
 
     std::sort(unlock.begin(), unlock.end());
-
+    // active_ids -= unlock
+    // cache_ids += unlock
     Move(active_ids_, unlock, cached_ids_);
 
     dbg(active_ids_, cached_ids_);
     return unlock.size();
 }
 
+/**
+ * 锁定 block。
+*/
 int BlockManager::Lock(const BlockIds& ids)
 {
     BlockIds lock;
@@ -231,10 +239,18 @@ void BlockManager::Touch(const BlockIds& ids)
     });
 }
 
+/**
+ * \param [in] block_ids
+ * \param [in] unique_ids
+ * \return valid 的 block 数量
+*/
 int BlockManager::Verify(const std::vector<int>& block_ids, const std::vector<uint64_t>& unique_ids)
 {
     FT_CHECK(block_ids.size() == unique_ids.size());
     int valid = block_ids.size();
+    // 找到第一个 invalidate 的 block
+    // ++ lvhan (23.12.26) 下面两个循环为什么不放在一起？下面有说：从第一个invalid block之后，应该都是invalid的了。
+    // 下面一个循环是为了校验的。
     for (int i = 0; i < block_ids.size(); ++i) {
         if (unique_id(block_ids[i]) != unique_ids[i]) {
             valid = i;

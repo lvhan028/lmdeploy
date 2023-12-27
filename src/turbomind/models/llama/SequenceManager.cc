@@ -14,7 +14,7 @@
 namespace turbomind {
 
 SequenceManager::SequenceManager(size_t      layer_num,
-                                 size_t      head_num,
+                                 size_t      head_num, // kv head number
                                  size_t      head_dim,
                                  size_t      block_seq_len,
                                  double      block_count,
@@ -35,6 +35,12 @@ SequenceManager::SequenceManager(size_t      layer_num,
     val_offset_ = block_size / 2;
 }
 
+/**
+ * \brief 创建新的序列
+ * \param [in] id 序列的id
+ * \return
+ * \note 当request的start_flag == true的时候，调用 Create。这时候表示序列的第一轮请求。
+*/
 const Sequence* SequenceManager::Create(uint64_t id)
 {
     Sequence sequence{id};
@@ -49,6 +55,12 @@ const Sequence* SequenceManager::Create(uint64_t id)
     return &it->second;
 }
 
+/**
+ * \brief 根据序列的id，从序列缓存中获取序列
+ * \param [in] id 序列的id
+ * \return
+ * \note 当request的start_flag == false的时候，调用 Get。如果在 sequence_ 中命中，那么就直接返回命中的序列。否则返回 nullptr
+*/
 const Sequence* SequenceManager::Get(uint64_t id)
 {
     if (auto it = sequences_.find(id); it != sequences_.end()) {
@@ -63,7 +75,8 @@ bool SequenceManager::Contains(uint64_t id)
 }
 
 /**
- * \param it [in, out]
+ * \param [in, out] it 要删除的序列在序列缓存中的位置
+ * \note 什么时候seq会被erase？request中有sequence_end时。
 */
 void SequenceManager::Erase(std::map<uint64_t, Sequence>::iterator& it)
 {
@@ -88,6 +101,9 @@ bool SequenceManager::Erase(uint64_t id)
     return false;
 }
 
+/**
+ * \brief 为 sequences 锁定被cache的block，避免其他sequence抢占或者强制换出
+*/
 void SequenceManager::VerifyAndLockCached(const Sequences& sequences)
 {
     BlockIds blocks;
@@ -134,23 +150,29 @@ void SequenceManager::UpdateAndSetUnlock(const Sequence& sequence)
 namespace {
 
 struct Schedule {
-    int free;
-    int cached;
+    int free;   // free block 数量（没有sequence在用）
+    int cached; // cache block 数量
 
     int allocate{};
     int evict{};
     int preempt{};
 
-    int last;
+    int last;   // 初始为 #sequences (当前的 + incoming的)
 
-    int input_count1;
-    int input_count2;
+    int input_count1;   // 暂时理解为 max_context_token_num
+    int input_count2;   // 暂时理解为 max_context_token_num
 
     Sequences        active;
     std::vector<int> block_counts;
     Sequences        inactive;
     Sequences        victims;
 
+    /**
+     * \param [in] snapshot 当前 block mgr中的快照
+     * \param [in] size 序列的数量: 当前在处理的 + incoming 的
+     * \param [in] _input_count1
+     * \param [in] _input_count1
+    */
     Schedule(Snapshot snapshot, int size, int _input_count1, int _input_count2):
         free(snapshot.free),
         cached(snapshot.cached),
@@ -177,9 +199,9 @@ struct Schedule {
     }
 
 private:
-    std::vector<int> use_count_;
-    std::vector<int> unlocked_;
-    int              it_;
+    std::vector<int> use_count_; // blockmgr中，所有 block 被 active sequences 使用的次数
+    std::vector<int> unlocked_; // 初始为 #sequences (当前的 + incoming的)
+    int              it_; // 初始为 #sequences (当前的 + incoming的)
 };
 
 template<typename T>
@@ -202,41 +224,58 @@ std::ostream& operator<<(std::ostream& os, const Schedule& s)
 }
 
 struct Transaction {
-    int index_;
-    int block_count_;
-    int input_count_;
+    int index_;         // transaction对应的sequence在sequences中的编号
+    int block_count_;   // transaction对应的sequence所需要的block数量
+    int input_count_;   // sequences_[index_] 当前的 input_length
 
-    int allocate_{};
-    int evict_{};
-    int preempt_{};
+    int allocate_{};    // 从free blocks中申请的数量
+    int evict_{};       // 从cache blocks中驱逐走的数量
+    int preempt_{};     // 抢占的数量
 
     Sequences victims_;
 
     const Sequences& sequences_;
     Schedule&        schedule_;
 
+    /**
+     * \brief
+     * \param [in] sequences 在处理的序列的集合（当前的 + incoming的）
+     * \param [in] index 一个序列在 sequences 中的下标
+     * \param [in] block_count sequences[index] 需要的 block 的数量
+     * \param [in] input_count sequences[index] 当前的input_length。对于incoming的sequence来说，它是input_ids的length。对于在处理的sequence来说，它的值是1（新生成的token）
+     * \param [in, out] sched 调度器
+     * \note
+    */
     explicit Transaction(const Sequences& sequences, int index, int block_count, int input_count, Schedule& sched):
         sequences_(sequences), schedule_(sched), index_(index), block_count_(block_count), input_count_(input_count)
     {
     }
 
+    /**
+     * \brief
+    */
     void Process()
     {
+        // ++ lvhan (23.12.26) 这个分支是不是总为真？什么情况下为假？Commit会更新参数
         if (schedule_.input_count1 > 0) {
             int count = block_count_;
 
+            // 先从 free blocks 中申请
             int tmp = std::min(schedule_.free, count);
             count -= tmp;
             allocate_ += tmp;
-
+            // 如果不够，就再从 cached 中申请
             tmp = std::min(schedule_.cached, count);
             count -= tmp;
             evict_ += tmp;
 
+            // 当前在处理的序列的编号是index_, 从最后一个序列开始往前，最后的序列优先级最低。
             for (int vidx = schedule_.last - 1; count && vidx > index_; --vidx) {
+                // ++ lvhan(23.12.26) 为啥忽略 cached sequence呢？因为incoming的sequence都是kCached的。
                 if (sequences_[vidx]->status == Sequence::kCached) {
                     continue;
                 }
+                // locked & active 的sequence 成了受害者，也就是当前在处理的sequence
                 victims_.push_back(sequences_[vidx]);
                 preempt_ += schedule_.Unlock(sequences_, vidx);
 
@@ -247,11 +286,13 @@ struct Transaction {
                     break;
                 }
             }
-            if (count == 0) {
+            if (count == 0) { // block 资源能满足，提交transaction
                 return Commit();
             }
         }
-
+        // ++ lvhan (23.12.26) 为啥要改为0，并且放在 inactive中 ？
+        // 因为前面没有走到 Commit，表示这个序列获取不到要求的block资源，所以就变成 inactive
+        // input_length为0，表示之后要重新 prefill
         const_cast<Sequence*>(sequences_[index_])->input_length = 0;
         schedule_.inactive.push_back(sequences_[index_]);
     }
@@ -293,6 +334,10 @@ std::ostream& operator<<(std::ostream& os, const Transaction& trans)
 
 }  // namespace
 
+/**
+ * \brief 把 sequences 和 context_lengths 按照 priorities 从小到大排序。结合 llamabatch中对优先级的规定,
+ * 也就是先来先服务原则
+*/
 void SequenceManager::SortByPriority(Sequences&                   sequences,
                                      std::vector<int>&            context_lengths,
                                      const std::vector<uint64_t>& priorities)
@@ -332,6 +377,9 @@ void SequenceManager::SortByPriority(Sequences&                   sequences,
 //     (reorder(ranges), ...);
 // }
 
+/** \brief 返回每个sequence所需要的block
+ *
+*/
 std::vector<int> SequenceManager::CountRequiredBlocks(const Sequences&        sequences,
                                                       const std::vector<int>& context_lengths,
                                                       int                     step_length)
@@ -384,6 +432,7 @@ auto SequenceManager::Materialize(Sequences                    sequences,
     // the blocks can still be preempted later
     VerifyAndLockCached(sequences);
 
+    // ++ lvhan（23.12.26）这里是用Dynamic SplitFuse。先略过。input_count1, input_count2 都是 max_context_token_num
     auto [input_count1, input_count2] = adjust(sequences, context_lengths);
 
     std::vector<int> required = CountRequiredBlocks(sequences, context_lengths, step_length);
@@ -398,6 +447,8 @@ auto SequenceManager::Materialize(Sequences                    sequences,
     }
 
     // mark remaining sequences invalid
+    // 上一个步骤 Transaction.Process，会从schedule.last倒序访问。高优先级的序列可能会抢占
+    // 低优先级序列的block，被抢占的sequence，会加入到inactive数组中
     for (int i = schedule.last; i < sequences.size(); ++i) {
         schedule.inactive.push_back(sequences[i]);
     }

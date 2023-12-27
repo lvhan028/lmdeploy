@@ -434,6 +434,8 @@ void LlamaBatch<T>::AdjustMaxInputCount(GenerationState&                    g,
         input_count += context_length[i] - sequences[i]->cache_len;
     }
     const int batch_size = sequences.size();
+    // ++ lvhan (23.12.26) 这里为啥要减去 batch_size。
+    // 这是Dynamic SplitFuse功能。现在还没细调。默认max_prefill_iters_=1，num_tokens_per_iter_和max_context_token_num相等
     input_count -= batch_size;
 
     // min tokens per iter for satisfying max prefill iters constraint
@@ -448,7 +450,7 @@ void LlamaBatch<T>::AdjustMaxInputCount(GenerationState&                    g,
     for (auto& x : g.min_input_count) {
         x = std::max(x, input_count);
     }
-
+    // ++ lvhan(23.12.26) 这里又把 batch_size 加回来了
     input_count = std::max(g.min_input_count.front() + batch_size, num_tokens_per_iter_);
     input_count = std::min(input_count, max_context_token_num_);
     // update max input count
@@ -457,7 +459,7 @@ void LlamaBatch<T>::AdjustMaxInputCount(GenerationState&                    g,
 }
 
 /**
- * \brief 初始化 xxx
+ * \brief 初始化 `GenerationState`
  * \param [in, out] g
 */
 template<typename T>
@@ -505,6 +507,12 @@ void LlamaBatch<T>::Initialize(GenerationState& g)
     };
 
     // TM_LOG_INFO("max_input_count %d", max_input_count);
+    // ++ lvhan(23.12.26) materialize 实现、具体化的意思
+    // sequences: 当前在处理的sequence(state_，以及新加入的Sequence(_incoming)
+    // context_lengths：state_ & incoming_ 中的sequence的context length
+    // priorities: state_ & incoming_ 中的请求的优先级，现在是用的request的unique_id表示的。这个unique_id是随着接收的请求数递增的
+    // step_length: decode的步长
+    // adjust: callable，如上
     auto outcome = sequence_manager_->Materialize(sequences, context_lengths, priorities, step_length_, adjust);
 
     if (outcome.allocation || outcome.swap_in || outcome.swap_out) {
