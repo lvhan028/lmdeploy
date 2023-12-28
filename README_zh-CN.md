@@ -76,17 +76,19 @@ lmdeploy(turbomind) v.s. tensorrt-llm
 
 # 支持的模型
 
-`LMDeploy` 有 `TurboMind` 和 `PyTorch` 两种推理后端。不同的推理后端在支持的模型类别、计算精度方面有所差别。用户可根据实际需求选择合适的推理引擎
+`LMDeploy` 支持 2 种推理引擎： `TurboMind` 和 `PyTorch`，它们侧重不同。前者追求推理性能的极致优化，后者纯用python开发，着重降低开发者的门槛。
+
+不同的推理引擎在支持的模型类别、计算精度方面有所差别。用户可根据实际需求选择合适的。有关两个推理引擎的架构，在[此处](<>)可以找到。
 
 ## TurboMind 支持的模型
 
 |        模型        | 模型规模 | FP16/BF16 | KV INT8 | W4A16 |
 | :----------------: | :------: | :-------: | :-----: | :---: |
-|       Llama        |  7B-65B  |    Yes    |   Yes   |  Yes  |
+|       Llama        | 7B - 65B |    Yes    |   Yes   |  Yes  |
 |       Llama2       | 7B - 70B |    Yes    |   Yes   |  Yes  |
 |      InternLM      | 7B - 20B |    Yes    |   Yes   |  Yes  |
 | InternLM-XComposer |    7B    |    Yes    |   Yes   |  Yes  |
-|        QWen        |  7B-72B  |    Yes    |   Yes   |  Yes  |
+|        QWen        | 7B - 72B |    Yes    |   Yes   |  Yes  |
 |      QWen-VL       |    7B    |    Yes    |   Yes   |  Yes  |
 |      Baichuan      |    7B    |    Yes    |   Yes   |  Yes  |
 |     Baichuan2      |    7B    |    Yes    |   Yes   |  Yes  |
@@ -102,7 +104,7 @@ lmdeploy(turbomind) v.s. tensorrt-llm
 
 # 快速上手
 
-LMDeploy提供了快速安装、模型量化、离线批处理、在线推理服务等功能。每个功能只需简单的几行行代码或者命令就可以完成
+LMDeploy提供了快速安装、模型量化、离线批处理、在线推理服务等功能。每个功能只需简单的几行代码或者命令就可以完成。
 
 <!-- toc -->
 
@@ -120,56 +122,29 @@ LMDeploy提供了快速安装、模型量化、离线批处理、在线推理服
 pip install lmdeploy
 ```
 
-## 离线推理
+## 离线批处理
 
-<!-- 这段最终是要体现使用统一的接口，用不同的后端来进行推理 -->
-
-<!-- 统一了之后，改成离线批处理-->
-
-<!-- ```
+```shell
 import lmdeploy
-
-pipe = lmdeploy.pipeline("InternLM/internlm-chat-7b", backend="turbomind", tp=1)
+pipe = lmdeploy.pipeline("InternLM/internlm-chat-7b", tp=1)
 response = pipe(["Hi, pls intro yourself", "Shanghai is"])
 print(response)
 ```
-如需使用 pytorch 引擎，`backend` 改成 `pytorch` 即可。支持多卡并行处理，只用修改`tp`参数。pipeline 更详细的介绍，请参考[这里]()。 -->
 
-<!-- pipeline 部分的文档，主要是来介绍参数等 -->
-
-### TurboMind 推理
-
-```shell
-
-```
-
-<!-- 使用 TurboMind 推理模型需要先将模型转化为 TurboMind 的格式，目前支持在线转换和离线转换两种形式。在线转换可以直接加载 Huggingface 模型，离线转换需需要先保存模型再加载。
-
-下面以 [internlm/internlm-chat-7b](https://huggingface.co/internlm/internlm-chat-7b) 为例，展示在线转换的使用方式。其他方式可参考[load_hf.md](docs/zh_cn/load_hf.md) -->
-
-<!-- > **Note**<br /> internlm/internlm-chat-7b 会自动下载到 `.cache` 文件夹，这里也可以传下载好的路径。
-
-> **Note**<br />
-> turbomind 在使用 FP16 精度推理 InternLM-7B 模型时，显存开销至少需要 15.7G。建议使用 3090, V100，A100等型号的显卡。<br />
-> 关闭显卡的 ECC 可以腾出 10% 显存，执行 `sudo nvidia-smi --ecc-config=0` 重启系统生效。
-
-> **Note**<br />
-> 使用 Tensor 并发可以利用多张 GPU 进行推理。在 `chat` 时添加参数 `--tp=<num_gpu>` 可以启动运行时 TP。 -->
-
-更过关于 turbomind 的介绍，请参考[](<>)
-
-### PyTorch 推理
+支持多卡并行处理，只用修改`tp`参数。关于 pipeline 的更多推理参数说明，请参考[这里](<>)
 
 ## 推理服务
 
-LMDeploy 支持把模型一键封装为推理服务。对外提供的 RESTful API 兼容 openai 的接口。请阅读[这里](<>)了解各接口的定义和使用方法。以下为服务启动和请求处理的示例：
+LMDeploy `api_server` 支持把模型一键封装为服务，对外提供的 RESTful API 兼容 openai 的接口。以下为服务启动和请求处理的示例：
 
 ```shell
 # 启动服务
-lmdeploy serve api_server InternLM/internlm-chat-7b --backend turbomind --tp 1
+lmdeploy serve api_server InternLM/internlm-chat-7b --backend turbomind --server-port 8080 --tp 1
 # 通过客户端，发送请求和接收结果
-lmdeploy serve api_client http://0.0.0.0:23333
+lmdeploy serve api_client http://0.0.0.0:8080
 ```
+
+在上述例子中，服务启动后，在浏览器输入 `http://0.0.0.0:8080`，可在线阅读和试用 `api_server` 的各接口，也可直接查阅[文档](<>)，了解各接口的定义和使用方法。
 
 ## 模型量化
 
@@ -194,9 +169,17 @@ LMDeploy 4bit 量化和推理支持的显卡包括：
 
 <!-- [点击这里](./docs/zh_cn/kv_int8.md) 查看 kv int8 使用方法、实现公式和测试结果。 -->
 
+### W8A8 量化
+
+## 更多功能
+
+[长文本推理](<>)
+[多模态模型推理](<>)
+[S-Lora支持](<>)
+
 ## 好用的工具
 
-LMDeploy 了
+LMDeploy CLI 提供了如下便捷的工具，方便用户快速体验模型对话效果
 
 ### 控制台交互式对话
 
@@ -220,79 +203,6 @@ lmdeploy serve gradio internlm/internlm-chat-7b --model-name internlm-chat-7b
 ![](https://github.com/InternLM/lmdeploy/assets/67539920/08d1e6f2-3767-44d5-8654-c85767cec2ab)
 
 ### 模型精度和速度评测工具
-
-#### 通过 Restful API 部署服务
-
-使用下面的命令启动推理服务：
-
-```shell
-# 安装lmdeploy额外依赖
-pip install lmdeploy[serve]
-
-lmdeploy serve api_server internlm/internlm-chat-7b --model-name internlm-chat-7b --instance_num 32 --tp 1
-```
-
-你可以通过命令行方式与推理服务进行对话：
-
-```shell
-# api_server_url is what printed in api_server.py, e.g. http://localhost:23333
-lmdeploy serve api_client api_server_url
-```
-
-也可以通过 WebUI 方式来对话：
-
-```shell
-# api_server_url is what printed in api_server.py, e.g. http://localhost:23333
-# server_ip and server_port here are for gradio ui
-# example: lmdeploy serve gradio http://localhost:23333 --server_name localhost --server_port 6006
-lmdeploy serve gradio api_server_url --server_name ${gradio_ui_ip} --server_port ${gradio_ui_port}
-```
-
-更多详情可以查阅 [restful_api.md](docs/zh_cn/restful_api.md)。
-
-### 基于 PyTorch 的推理
-
-你必须确保环境中有安装 deepspeed：
-
-```
-pip install deepspeed
-```
-
-#### 单个 GPU
-
-```shell
-lmdeploy chat torch $NAME_OR_PATH_TO_HF_MODEL\
-    --max_new_tokens 64 \
-    --temperature 0.8 \
-    --top_p 0.95 \
-    --seed 0
-```
-
-#### 使用 DeepSpeed 实现张量并行
-
-```shell
-deepspeed --module --num_gpus 2 lmdeploy.pytorch.chat \
-    $NAME_OR_PATH_TO_HF_MODEL \
-    --max_new_tokens 64 \
-    --temperature 0.8 \
-    --top_p 0.95 \
-    --seed 0
-```
-
-<!-- ## 量化部署 -->
-
-<!-- #### 权重 INT4 量化
-
-LMDeploy 使用 [AWQ](https://arxiv.org/abs/2306.00978) 算法对模型权重进行量化
-
-[点击这里](./docs/zh_cn/w4a16.md) 查看 weight int4 用法测试结果。
-
-#### KV Cache INT8 量化
-
-[点击这里](./docs/zh_cn/kv_int8.md) 查看 kv int8 使用方法、实现公式和测试结果。
-
-> **Warning**<br />
-> 量化部署不支持运行时 Tensor 并发。如果希望使用 Tensor 并发，需要在 deploy 时配置 tp 参数。 -->
 
 ## 贡献指南
 
