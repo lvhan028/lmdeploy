@@ -11,6 +11,13 @@
 
 namespace turbomind {
 
+/**
+ * \brief
+ * \param [in] block_size k/v block 的大小（in bytes）
+ * \param [in] block_count block 数量。constructor 根据 block_count 的取值，重新计算 max_block_count_
+ * \param [in] chunk_size 每次分配 block 的时候，要分配多少个block。内部会根据这个参数，以及计算的 max_block_count_，重新计算 chunk_size_
+ * \param [in] allocator 分配器
+*/
 BlockManager::BlockManager(size_t block_size, double block_count, int chunk_size, IAllocator* allocator):
     block_size_(block_size), allocator_(allocator)
 {
@@ -53,6 +60,9 @@ BlockManager::~BlockManager()
     }
 }
 
+/**
+ * \brief 开辟 block， 一次最多 chunk_size_ 个 block
+*/
 bool BlockManager::Malloc()
 {
     auto chunk_size = std::min<int>(chunk_size_, max_block_count_ - blocks_.size());
@@ -81,6 +91,11 @@ bool BlockManager::Malloc()
     return true;
 }
 
+/**
+ * 算 max_block_count_
+ * \param [in] block_size block的大小 in byte
+ * \param [in] 总显存的百分比。之后要改成，加载完模型权重后，再计算
+*/
 size_t BlockManager::GetBlockCount(size_t block_size, double ratio)
 {
     size_t free{};
@@ -89,6 +104,11 @@ size_t BlockManager::GetBlockCount(size_t block_size, double ratio)
     return static_cast<size_t>(total * ratio) / block_size;
 }
 
+/**
+ * src = src - delta
+ * dst = dst + delta
+ * std::set_difference要求迭代器区间里的数据是递增的
+*/
 void BlockManager::Move(std::vector<int>& src, const std::vector<int>& delta, std::vector<int>& dst)
 {
     FT_CHECK(src.size() >= delta.size());
@@ -107,6 +127,11 @@ void BlockManager::Move(std::vector<int>& src, const std::vector<int>& delta, st
     dst.swap(dst1);
 }
 
+/**
+ * \brief 获取 `count`个free blocks，返回 blocks ids, unique ids 的pair
+ * 申请到的 free blocks, 它们的 use_count 会改成1，unqiue_id会递增，变成了 active 状态
+ * \param count [in] 申请的数量
+*/
 auto BlockManager::Allocate(int count) -> std::pair<BlockIds, UniqueIds>
 {
     while (free_ids_.size() < count) {
@@ -128,7 +153,7 @@ auto BlockManager::Allocate(int count) -> std::pair<BlockIds, UniqueIds>
         block_ids[i]  = idx;
         unique_ids[i] = b.unique_id;
     }
-
+    // ++ lvhan(23.12.27) 这3个容器内，数据一定是sorted的么？
     Move(free_ids_, block_ids, active_ids_);
 
     dbg(free_ids_, active_ids_);
@@ -136,6 +161,11 @@ auto BlockManager::Allocate(int count) -> std::pair<BlockIds, UniqueIds>
     return {block_ids, unique_ids};
 }
 
+/**
+ * 把cached blocks驱逐出去，按照 timestamp 从小到大的顺序，也就是 LRU
+ * 被驱逐出去的block，会放入到free数组中
+ * 被选中的要驱逐出去的block，会先排序，然后再放入到free_ids_中
+*/
 void BlockManager::Evict(int count)
 {
     FT_CHECK(count <= cached_ids_.size());
@@ -163,6 +193,9 @@ void BlockManager::Evict(int count)
     dbg(cached_ids_, free_ids_);
 }
 
+/**
+ * 释放 block。block ids 会被sort
+*/
 void BlockManager::Free(BlockIds ids)
 {
     std::sort(ids.begin(), ids.end());
@@ -233,6 +266,7 @@ int BlockManager::Lock(const BlockIds& ids)
 
 void BlockManager::Touch(const BlockIds& ids)
 {
+    // why reverse order?
     std::for_each(ids.crbegin(), ids.crend(), [this](int i) {
         FT_CHECK(is_active(blocks_[i]));
         blocks_[i].timestamp = timestamp_++;
@@ -267,6 +301,9 @@ int BlockManager::Verify(const std::vector<int>& block_ids, const std::vector<ui
     return valid;
 }
 
+/**
+ * blocks_ 当前的快照：#active, #cache, #free, 每个block被use的状态
+*/
 Snapshot BlockManager::TakeSnapshot()
 {
     std::vector<int> use_count(blocks_.size());
