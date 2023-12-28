@@ -24,9 +24,9 @@ namespace turbomind {
 struct Block {
     int      id;         // fixed linear id in the pool
     int      use_count;  // active sequences using the block
-    uint64_t unique_id;  // unique for every block allocation
-    uint64_t timestamp;
-    void*    data;
+    uint64_t unique_id;  // unique for every block allocation, 初始 malloc 的时候，不会初始化这个变量
+    uint64_t timestamp;  // 初始为0
+    void*    data;       // k/v 数据的地址。指向的是 chunks_ 中的地址
 
     friend std::ostream& operator<<(std::ostream& os, const Block& block);
     friend std::string   to_string(const Block& b)
@@ -108,6 +108,8 @@ public:
 
     int free_count() const noexcept
     {
+        // max_block_count_ - blocks_.size() 表示还有多少没有被malloc
+        // free_ids_ 是已经malloc的，但还没有被用的。
         return (max_block_count_ - blocks_.size()) + free_ids_.size();
     }
 
@@ -142,11 +144,11 @@ private:
 
     BlockIds active_ids_;
     BlockIds cached_ids_;
-    BlockIds free_ids_;
+    BlockIds free_ids_;     // 每次申请一个chunk的时候，chunk中的block.id加入到free_ids_中
 
     std::vector<Block> blocks_;  // < 100k
 
-    uint64_t unique_id_{1};
+    uint64_t unique_id_{1}; //单调增
     uint64_t timestamp_{1};
 };
 

@@ -141,7 +141,7 @@ private:
 private:
     int    block_seq_len_;  // 一个 block 存储的 seq 的长度。一个 block 是所有layer的所有 k/v 的长度为seq的cache块
     int    rank_;
-    size_t val_offset_{};
+    size_t val_offset_{}; // v cache 在k/v cache中的offset
 
     // Use `std::map` to avoid reference invalidation
     std::map<uint64_t, Sequence> sequences_;

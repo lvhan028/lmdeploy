@@ -82,6 +82,7 @@ void SequenceManager::Erase(std::map<uint64_t, Sequence>::iterator& it)
 {
     auto& seq = it->second;
     if (seq.status == Sequence::kCached) {
+        // 获取seq中valid的block数量
         const int count = block_manager_->Verify(seq.blocks, seq.block_unique_ids);
         seq.blocks.resize(count);
     }
@@ -125,6 +126,11 @@ void SequenceManager::VerifyAndLockCached(const Sequences& sequences)
     block_manager_->Lock(blocks);
 }
 
+/**
+ * 提交 unlock 和 free 的 block
+ * 被 unlock 的 block 一定都是 active 的block。`UpdateAndSetUnlock`会把 active/locked 的 sequence的 block 加入到unlocked_里面
+ * 被free的block一定是 cached 的 block
+*/
 void SequenceManager::CommitUnlockAndFree()
 {
     if (!unlocked_.empty()) {
@@ -138,6 +144,12 @@ void SequenceManager::CommitUnlockAndFree()
     }
 }
 
+/**
+ * \brief 更新非 cached 状态的sequence的资源
+ * sequence 的所有 blocks（这些block必须都是active状态）的 timestamp 增加。timestamp和block换出策略有关（LRU）
+ * 把sequence的block都插入到unlocked_ blocks中
+ * 序列状态改成 cached
+*/
 void SequenceManager::UpdateAndSetUnlock(const Sequence& sequence)
 {
     FT_CHECK(sequence.status != Sequence::kCached);
@@ -153,9 +165,9 @@ struct Schedule {
     int free;   // free block 数量（没有sequence在用）
     int cached; // cache block 数量
 
-    int allocate{};
-    int evict{};
-    int preempt{};
+    int allocate{}; //需要申请的block的数量
+    int evict{};    //需要换出去的block的数量
+    int preempt{};  //需要抢占的block的数量
 
     int last;   // 初始为 #sequences (当前的 + incoming的)
 
@@ -185,6 +197,9 @@ struct Schedule {
     {
     }
 
+    /**
+     * 为什么不直接看seqs[vidx]占用的block的使用情况，而是要进行一个循环呢？++lvhan (23.12.27)
+    */
     int Unlock(const Sequences& seqs, int vidx)
     {
         while (vidx < it_) {
@@ -193,6 +208,7 @@ struct Schedule {
             for (const auto& bid : blocks) {
                 count += static_cast<int>(--use_count_[bid] == 0);
             }
+            // 编号为 it_ 的sequence有多少在用的block（有可能它刚开始申请的block，还没有被用，毕竟是一步步的forward的
             unlocked_[it_] = count;
         }
         return unlocked_[vidx];
@@ -200,7 +216,7 @@ struct Schedule {
 
 private:
     std::vector<int> use_count_; // blockmgr中，所有 block 被 active sequences 使用的次数
-    std::vector<int> unlocked_; // 初始为 #sequences (当前的 + incoming的)
+    std::vector<int> unlocked_; // 初始长度 #sequences (当前的 + incoming的)
     int              it_; // 初始为 #sequences (当前的 + incoming的)
 };
 
@@ -256,7 +272,7 @@ struct Transaction {
     */
     void Process()
     {
-        // ++ lvhan (23.12.26) 这个分支是不是总为真？什么情况下为假？Commit会更新参数
+        // ++ lvhan (23.12.26) 这个分支是不是总为真？什么情况下为假？Commit函数会更新参数
         if (schedule_.input_count1 > 0) {
             int count = block_count_;
 
@@ -271,7 +287,7 @@ struct Transaction {
 
             // 当前在处理的序列的编号是index_, 从最后一个序列开始往前，最后的序列优先级最低。
             for (int vidx = schedule_.last - 1; count && vidx > index_; --vidx) {
-                // ++ lvhan(23.12.26) 为啥忽略 cached sequence呢？因为incoming的sequence都是kCached的。
+                // ++ lvhan(23.12.26) 为啥忽略 cached sequence呢？因为incoming的sequence都是kCached的，是新的序列，需要尽快处理这些序列，给用户响应
                 if (sequences_[vidx]->status == Sequence::kCached) {
                     continue;
                 }
@@ -393,6 +409,12 @@ std::vector<int> SequenceManager::CountRequiredBlocks(const Sequences&        se
     return required;
 }
 
+/**
+ * \param [in] sequences active sequence的列表
+ * \param [in] counts 存每个active sequence当前所用的block数量。它的长度和`sequences`的长度相同
+ * \param [in] blocks 申请到的block
+ * \param [in] unique_ids。申请到的block的unique_id的集合。它的长度和blocks的长度相同
+*/
 void SequenceManager::AssignAndActivate(const Sequences&        sequences,  //
                                         const std::vector<int>& counts,
                                         const BlockIds&         blocks,
@@ -412,6 +434,12 @@ void SequenceManager::AssignAndActivate(const Sequences&        sequences,  //
     }
 }
 
+/**
+ * \param [in] sequences 当前在处理的sequence，以及新加入的Sequence
+ * \param [in] context_lengths `sequences` 中每个序列的 context_length
+ * \param [in] priorities   `sequences` 中每个序列的优先级
+ * \param [in] step_length decoding阶段的步长
+*/
 auto SequenceManager::Materialize(Sequences                    sequences,
                                   std::vector<int>             context_lengths,
                                   const std::vector<uint64_t>& priorities,
@@ -424,12 +452,14 @@ auto SequenceManager::Materialize(Sequences                    sequences,
     // process deferred unlock and free operations
     CommitUnlockAndFree();
 
+    // 根据先来先服务的顺序，对sequences进行排序
     SortByPriority(sequences, context_lengths, priorities);
 
     // SortByPriority(priorities, sequences, context_lengths);
 
     // Verify and lock cache sequences to avoid their blocks being evicted unnoticed
     // the blocks can still be preempted later
+    // Materialize 被 llamabatch::ProcessInferRequests调用，对于新序列（request.start_flag==true，它是 kCached的状态
     VerifyAndLockCached(sequences);
 
     // ++ lvhan（23.12.26）这里是用Dynamic SplitFuse。先略过。input_count1, input_count2 都是 max_context_token_num
@@ -441,6 +471,9 @@ auto SequenceManager::Materialize(Sequences                    sequences,
     Schedule schedule(block_manager_->TakeSnapshot(), sequences.size(), input_count1, input_count2);
 
     // `schedule.last` is decreasing in the loop
+    // 从高优先级的sequence开始，分配它所需要的 block。首先会从free blocks中申请，如果不够，就从cache block中申请。
+    // free block、cache block数量都存在了schedule中，通过blockmgr的快照拿到。
+    // sequence 所需要的数量在前面的 CountRequiredBlocks中算出来了
     for (int i = 0; i < schedule.last; ++i) {
         const int input_length = context_lengths[i] - sequences[i]->cache_len;
         Transaction{sequences, i, required[i], input_length, schedule}.Process();
