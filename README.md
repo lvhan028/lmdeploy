@@ -43,57 +43,62 @@ ______________________________________________________________________
 
 LMDeploy is a toolkit for compressing, deploying, and serving LLM, developed by the [MMRazor](https://github.com/open-mmlab/mmrazor) and [MMDeploy](https://github.com/open-mmlab/mmdeploy) teams. It has the following core features:
 
-- **Efficient Inference Engine (TurboMind)**: It develops key features like persistent batch(a.k.a. continuous batching), blocked KV cache, dynamic split&fuse, tensor parallelism, high-performance CUDA kernels and so on, ensuring the high throughput and low latency during LLMs inference.
+- **Efficiency**: LMDeploy delivers up to 1.8x higher request throughput than vLLM, by introducing key features like persistent batch(a.k.a. continuous batching), blocked KV cache, dynamic split&fuse, tensor parallelism, high-performance CUDA kernels and so on.
 
-- **Interactive Inference Mode**: By caching the k/v of attention during multi-round dialogue processes, the engine remembers dialogue history, thus avoiding repetitive processing of historical sessions.
-
-- **Quantization**: LMDeploy supports various quantization methods and efficient inference of quantized models. The reliability of quantization has been verified on models of different scales.
-
-# Performance
-
-The TurboMind engine achieves up to 1.36 ~ 1.85 times higher request throughput compared to vLLM across models of various size. In terms of static inference capabilities, the token throughput (`out token/s`) of TurboMind's 4bit model inference significantly outperforms FP16/BF16 inference, with an improvement of up to 2.4 times.
+- **Quantization**: LMDeploy supports weight-only and k/v quantization, and the 4-bit inference performance is 2.4x higher than FP16. The quantization quality has been confirmed via OpenCompass evaluation.
 
 ![v0 1 0-benchmark](https://github.com/InternLM/lmdeploy/assets/4560679/8e455cf1-a792-4fa8-91a2-75df96a2a5ba)
 
-For inference benchmarks in more devices and more settings, please refer to the following link:
+For detailed inference benchmarks in more devices and more settings, please refer to the following link:
 
-- [A100](./docs/en/benchmark/a100_fp16.md)
+- [A100-FP16](./docs/en/benchmark/a100_fp16.md)
+- [A100-W4A16](./docs/en/benchmark/a100_w4a16.md)
+- V100
 - 4090
 - 3090
 - 2080
 
 # Supported Models
 
-`LMDeploy` has developed two inference engines - `Pytorch` and `TurboMind`, each with a different focus. The former strives for ultimate optimization of inference performance, while the latter, developed purely in Python, aims to decrease the barriers for developers.
+|       Model        |   Size    | FP16/BF16 | KV INT8 | W4A16 |
+| :----------------: | :-------: | :-------: | :-----: | :---: |
+|       Llama        | 7B - 65B  |    Yes    |   Yes   |  Yes  |
+|       Llama2       | 7B - 70B  |    Yes    |   Yes   |  Yes  |
+|      InternLM      | 7B - 20B  |    Yes    |   Yes   |  Yes  |
+| InternLM-XComposer |    7B     |    Yes    |   Yes   |  Yes  |
+|        QWen        | 7B - 72B  |    Yes    |   Yes   |  Yes  |
+|      QWen-VL       |    7B     |    Yes    |   Yes   |  Yes  |
+|      Baichuan      |    7B     |    Yes    |   Yes   |  Yes  |
+|     Baichuan2      | 7B - 13B  |    Yes    |   Yes   |  Yes  |
+|     Code Llama     | 7B - 34B  |    Yes    |   No    |  No   |
+|      ChatGLM2      |    6B     |    Yes    |   No    |  No   |
+|       Falcon       | 7B - 180B |    Yes    |   No    |  No   |
 
-As shown in the next tables, the inference engines differ in the types of supported models and the inference data type. Users can choose the one that best fits their actual needs.
+`LMDeploy` has developed two inference engines - `TurboMind` and `PyTorch`, each with a different focus. The former strives for ultimate optimization of inference performance, while the latter, developed purely in Python, aims to decrease the barriers for developers.
+You can find their capabilities from the guide, and choose the engine wisely according to your requirements.
 
-## TurboMind
+# Quick Start
 
-|       Model        |   Size   | FP16/BF16 | KV INT8 | W4A16 |
-| :----------------: | :------: | :-------: | :-----: | :---: |
-|       Llama        | 7B - 65B |    Yes    |   Yes   |  Yes  |
-|       Llama2       | 7B - 70B |    Yes    |   Yes   |  Yes  |
-|      InternLM      | 7B - 20B |    Yes    |   Yes   |  Yes  |
-| InternLM-XComposer |    7B    |    Yes    |   Yes   |  Yes  |
-|        QWen        | 7B - 72B |    Yes    |   Yes   |  Yes  |
-|      QWen-VL       |    7B    |    Yes    |   Yes   |  Yes  |
-|      Baichuan      |    7B    |    Yes    |   Yes   |  Yes  |
-|     Baichuan2      |    7B    |    Yes    |   Yes   |  Yes  |
-|     Code Llama     | 7B - 34B |    Yes    |   No    |  No   |
+## Installation
 
-## Pytorch
+Install lmdeploy with pip ( python 3.8+) or [from source](./docs/en/build.md)
 
-|   Model   |   Size    | FP16/BF16 | KV INT8 | W8A8 |
-| :-------: | :-------: | :-------: | :-----: | :--: |
-|   Llama   | 7B - 65B  |    Yes    |   No    | Yes  |
-|  Llama2   | 7B - 70B  |    Yes    |   No    | Yes  |
-| InternLM  | 7B - 20B  |    Yes    |   No    | Yes  |
-| Baichuan2 | 7B - 13B  |    Yes    |   No    | Yes  |
-| ChatGLM2  |    6B     |    Yes    |   No    |  No  |
-|  Falcon   | 7B - 180B |    Yes    |   No    |  No  |
+```shell
+pip install lmdeploy
+```
 
-# Getting Started
+## Offline Batch Inference
+
+```python
+import lmdeploy
+pipe = lmdeploy.pipeline("internlm/internlm-chat-7b")
+response = pipe(["Hi, pls intro yourself", "Shanghai is"])
+print(response)
+```
+
+For more information about the inference pipeline, please refer to [here](docs/en/inference/pipeline.md).
+
+# Tutorials
 
 Please overview [getting_started](./docs/en/get_started.md) section for the basic usage of LMDeploy.
 
