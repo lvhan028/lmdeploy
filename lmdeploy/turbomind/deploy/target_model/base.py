@@ -207,7 +207,7 @@ class BaseOutputModel(ABC):
 
             # currently, the tensor type should in
             # [torch.float, torch.half, torch.bfloat16, torch.int32]
-            torch_tensor = param.cuda().contiguous()
+            torch_tensor = param.contiguous()
             assert torch_tensor.dtype in [
                 torch.int32, torch.float, torch.half, torch.bfloat16
             ]
