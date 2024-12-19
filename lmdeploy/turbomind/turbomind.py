@@ -556,23 +556,11 @@ class TurboMindInstance:
 
         gen_cfg = self._get_generation_config(gen_config)
 
-        logger.info(
-            f'[-prepare_inputs] session_id {session_id}, input_ids size '
-            f'{len(input_ids)}, start {sequence_start}, end {sequence_end}, '
-            f'step {step}, gen_config {gen_config}')
         inputs, input_length = self.prepare_inputs(
             input_ids=input_ids,
             input_embeddings=input_embeddings,
             input_embedding_ranges=input_embedding_ranges,
             gen_config=gen_config)
-        if input_embeddings:
-            logger.info(f'session_id {session_id}, embedding size '
-                        f'{len(input_embeddings)}, range size '
-                        f'{len(input_embedding_ranges)}')
-            for i, (embed, ranges) in enumerate(
-                    zip(input_embeddings, input_embedding_ranges)):
-                logger.info(f'session_id {session_id}, embeddings[{i}].shape '
-                            f'{embed.shape}, ranges[{i}].value {ranges}')
 
         session = _tm.SessionParam(id=session_id,
                                    step=step,
