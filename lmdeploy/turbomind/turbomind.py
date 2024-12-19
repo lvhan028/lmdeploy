@@ -638,7 +638,18 @@ class TurboMindInstance:
         if stream_output and not stop:
             logger.info(f'Register stream callback for {session_id}')
             self.model_inst.register_callback(_forward_callback)
-
+        logger.info(
+            f'[-prepare_inputs] session_id {session_id}, input_ids size '
+            f'{len(input_ids)}, start {sequence_start}, end {sequence_end}, '
+            f'step {step}, stop {stop}, gen_config {gen_config}')
+        if input_embeddings:
+            logger.info(f'session_id {session_id}, embedding size '
+                        f'{len(input_embeddings)}, range size '
+                        f'{len(input_embedding_ranges)}')
+            for i, (embed, ranges) in enumerate(
+                    zip(input_embeddings, input_embedding_ranges)):
+                logger.info(f'session_id {session_id}, embeddings[{i}].shape '
+                            f'{embed.shape}, ranges[{i}].value {ranges}')
         inputs, input_lengths = self.prepare_inputs(
             session_id=session_id,
             input_ids=input_ids,
@@ -649,7 +660,7 @@ class TurboMindInstance:
             step=step,
             stop=stop,
             gen_config=gen_config)
-
+        logger.info(f'[+prepare_inputs] session_id {session_id}, {inputs}')
         tm_inputs = _np_dict_to_tm_dict(inputs)
         _forward_thread(tm_inputs)
 

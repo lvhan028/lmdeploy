@@ -3,6 +3,7 @@
 #pragma once
 
 #include "src/turbomind/utils/Tensor.h"
+#include "src/turbomind/utils/logger.h"
 #include <condition_variable>
 #include <cstdint>
 #include <future>
@@ -56,9 +57,11 @@ public:
             for (auto& r : requests) {
                 futures.push_back(r->signal.get_future());
                 if (r->stop_flag) {
+                    TM_LOG_INFO("[enqueue] push request %ld to stop queue", (long)r->id);
                     stop_queue_.push(std::move(r));
                 }
                 else {
+                    TM_LOG_INFO("[enqueue] push request %ld to infer queue", (long)r->id);
                     infer_queue_.push(std::move(r));
                 }
             }
