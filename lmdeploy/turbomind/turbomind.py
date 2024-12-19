@@ -556,11 +556,23 @@ class TurboMindInstance:
 
         gen_cfg = self._get_generation_config(gen_config)
 
+        logger.info(
+            f'[-prepare_inputs] session_id {session_id}, input_ids size '
+            f'{len(input_ids)}, start {sequence_start}, end {sequence_end}, '
+            f'step {step}, gen_config {gen_config}')
         inputs, input_length = self.prepare_inputs(
             input_ids=input_ids,
             input_embeddings=input_embeddings,
             input_embedding_ranges=input_embedding_ranges,
             gen_config=gen_config)
+        if input_embeddings:
+            logger.info(f'session_id {session_id}, embedding size '
+                        f'{len(input_embeddings)}, range size '
+                        f'{len(input_embedding_ranges)}')
+            for i, (embed, ranges) in enumerate(
+                    zip(input_embeddings, input_embedding_ranges)):
+                logger.info(f'session_id {session_id}, embeddings[{i}].shape '
+                            f'{embed.shape}, ranges[{i}].value {ranges}')
 
         session = _tm.SessionParam(id=session_id,
                                    step=step,
@@ -608,7 +620,8 @@ class TurboMindInstance:
                 output_ids += output_ids_buf[prev_len:seq_len].tolist()
                 output_len += seq_len - prev_len
 
-                status = ResponseType.FINISH if finish else ResponseType.SUCCESS
+                status = (ResponseType.FINISH
+                          if finish else ResponseType.SUCCESS)
                 output = EngineOutput(status, output_ids, output_len.item(),
                                       out_logprobs)
 
@@ -625,8 +638,8 @@ class TurboMindInstance:
 
         finally:
             async with self.cond:
-                # Contract: `notfiy` won't be called again if status is non-zero
-                # wait for status to be set as `finish` or `error`
+                # Contract: `notfiy` won't be called again if status is
+                # non-zero wait for status to be set as `finish` or `error`
                 while not state or state.status == 0:
                     while not self.flag:
                         await self.cond.wait()
@@ -756,7 +769,8 @@ class TurboMindInstance:
                 output_ids += output_ids_buf[prev_len:seq_len].tolist()
                 output_len += seq_len - prev_len
 
-                status = ResponseType.FINISH if finish else ResponseType.SUCCESS
+                status = (ResponseType.FINISH
+                          if finish else ResponseType.SUCCESS)
                 output = EngineOutput(status, output_ids, output_len.item(),
                                       out_logprobs)
 
@@ -777,8 +791,8 @@ class TurboMindInstance:
 
         finally:
             with self.cond:
-                # Contract: `notfiy` won't be called again if status is non-zero
-                # wait for status to be set as `finish` or `error`
+                # Contract: `notfiy` won't be called again if status is
+                # non-zero wait for status to be set as `finish` or `error`
                 while not state or state.status == 0:
                     while not self.flag:
                         self.cond.wait()

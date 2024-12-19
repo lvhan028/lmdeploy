@@ -278,6 +278,7 @@ void LlamaBatch<T>::ProcessInferRequests(const Requests& reqs, std::vector<Signa
 
             auto check_embeddings = [&](int& num_valid_embeddings) {
                 if (range_tensor.shape.size() != 3 || range_tensor.shape[2] % 2 != 0) {
+                    TM_LOG_ERROR("range_tensor size %d, shape[2] %d", range_tensor.shape.size(), range_tensor.shape[2]);
                     return false;
                 }
                 int embedding_count  = range_tensor.shape[1];
@@ -293,6 +294,10 @@ void LlamaBatch<T>::ProcessInferRequests(const Requests& reqs, std::vector<Signa
                     }
                     if (begin >= end || end > input_length || begin < pre_end
                         || embedding_length * model_->hidden_units_ * sizeof(T) > emb_tensor.shape[1]) {
+                            if (rank_ == 0) {
+                                TM_LOG_ERROR("invalid embedding. request %ld, begin %d, end %d, input_length %d, pre_end %d, embedding_length %d, emb_tensor %d", \
+                                (long)r->id, begin, end, input_length, pre_end, embedding_length, emb_tensor.shape[1]);
+                            }
                         return false;
                     }
                     pre_end              = end;
@@ -303,12 +308,14 @@ void LlamaBatch<T>::ProcessInferRequests(const Requests& reqs, std::vector<Signa
 
             int num_valid_embeddings = 0;
             if (!check_embeddings(num_valid_embeddings)) {
-                TM_LOG_WARNING("[ImageFeature] Skip invalid input embeddings, id = %ld, input_length = %d, "
+                if (rank_ == 0) {
+                    TM_LOG_WARNING("[ImageFeature] Skip invalid input embeddings, id = %ld, input_length = %d, "
                                "input embeddings = %s, range_tensor = %s",
                                (long)seq.id,
                                input_length,
                                emb_tensor.toString().c_str(),
                                range_tensor.toString().c_str());
+                }
             }
             else {
                 const char* emb_tensor_ptr = emb_tensor.getPtr<char>();
@@ -1353,6 +1360,9 @@ auto LlamaBatch<T>::Finish(GenerationState& g) -> std::vector<Signal>
                 auto& r = state_->requests[i];
                 if (state_->h_finished[i]) {
                     // Interrupt finished sequences and move the request handle into the signal closure
+                    if (rank_ == 0) {
+                        TM_LOG_INFO("[Interrupt] finished sequence, request id %d, finished %d", state_->requests[i]->id, state_->h_finished[i]);
+                    }
                     signals.push_back(Interrupt(i));
                     ++g.finished_count;
                 }
@@ -1384,7 +1394,7 @@ template<typename T>
 auto LlamaBatch<T>::Interrupt(int index, bool force_stop, bool force_end) -> Signal
 {
     if (rank_ == 0) {
-        TM_LOG_INFO("[Interrupt] slot = %d, id = %lu", index, (long)state_->requests[index]->id);
+        TM_LOG_INFO("[Interrupt] slot = %d, id = %lu, force_stop = %d, force_end = %d", index, (long)state_->requests[index]->id, force_stop, force_end);
     }
 
     if (debug_ && rank_ == 0) {

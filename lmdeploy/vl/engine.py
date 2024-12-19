@@ -24,6 +24,9 @@ def _raise_exception_on_finish(task: asyncio.Task) -> None:
     except asyncio.CancelledError:
         return
     except Exception as e:
+        logger.error(f'got exception {e}')
+        import sys
+        sys.exit(-1)
         raise e
 
 
