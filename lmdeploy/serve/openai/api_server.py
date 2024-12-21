@@ -483,6 +483,9 @@ async def chat_completions_v1(request: ChatCompletionRequest,
     async for res in result_generator:
         if await raw_request.is_disconnected():
             # Abort the request if the client disconnects.
+            logger.warning(
+                f'abort the session {request.session_id} since the client'
+                ' disconnected')
             await VariableInterface.async_engine.stop_session(
                 request.session_id)
             return create_error_response(HTTPStatus.BAD_REQUEST,
@@ -712,6 +715,9 @@ async def completions_v1(request: CompletionRequest,
         async for res in generator:
             if await raw_request.is_disconnected():
                 # Abort the request if the client disconnects.
+                logger.warning(
+                    f'abort the session {request.session_id} since the client'
+                    ' disconnected')
                 await VariableInterface.async_engine.stop_session(
                     request.session_id)
                 return create_error_response(HTTPStatus.BAD_REQUEST,
@@ -844,6 +850,7 @@ async def chat_interactive_v1(request: GenerateRequest,
     """
     if request.cancel:
         if request.session_id != -1:
+            logger.warning(f'request to stop the session {request.session_id}')
             await VariableInterface.async_engine.stop_session(
                 request.session_id)
             return {
@@ -928,6 +935,9 @@ async def chat_interactive_v1(request: GenerateRequest,
         async for out in generation:
             if await raw_request.is_disconnected():
                 # Abort the request if the client disconnects.
+                logger.warning(
+                    f'abort the session {request.session_id} since the client'
+                    ' disconnected')
                 await async_engine.stop_session(request.session_id)
                 return create_error_response(HTTPStatus.BAD_REQUEST,
                                              'Client disconnected')
@@ -1070,6 +1080,12 @@ def serve(model_path: str,
         http_or_https = 'https'
 
     _, pipeline_class = get_task(model_path)
+
+    if backend_config is None:
+        backend_config = TurbomindEngineConfig()
+        for key, value in kwargs.items():
+            if hasattr(TurbomindEngineConfig, key):
+                setattr(backend_config, key, value)
 
     VariableInterface.async_engine = pipeline_class(
         model_path=model_path,

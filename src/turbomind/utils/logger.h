@@ -19,6 +19,9 @@
 #include <cstdlib>
 #include <map>
 #include <string>
+#include <chrono>
+#include <ctime>
+#include <iomanip>
 
 #include "src/turbomind/utils/string_utils.h"
 
@@ -54,10 +57,11 @@ public:
     void log(const Level level, const std::string format, const Args&... args)
     {
         if (level_ <= level) {
+            std::string timestamp = getTimestamp();
             std::string fmt = getPrefix(level) + format + "\n";
             // FILE*       out    = level_ < WARNING ? stdout : stderr;
             std::string logstr = fmtstr(fmt, args...);
-            fprintf(stderr, "%s", logstr.c_str());
+            fprintf(stderr, "%s %s", timestamp.c_str(), logstr.c_str());
         }
     }
 
@@ -65,10 +69,11 @@ public:
     void log(const Level level, const int rank, const std::string format, const Args&... args)
     {
         if (level_ <= level) {
+            std::string timestamp = getTimestamp();
             std::string fmt = getPrefix(level, rank) + format + "\n";
             // FILE*       out    = level_ < WARNING ? stdout : stderr;
             std::string logstr = fmtstr(fmt, args...);
-            fprintf(stderr, "%s", logstr.c_str());
+            fprintf(stderr, "%s %s", timestamp.c_str(), logstr.c_str());
         }
     }
 
@@ -110,6 +115,15 @@ private:
     inline const std::string getPrefix(const Level level, const int rank)
     {
         return PREFIX + "[" + getLevelName(level) + "][" + std::to_string(rank) + "] ";
+    }
+    inline const std::string getTimestamp() {
+        auto now = std::chrono::system_clock::now();
+        std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+        std::tm now_tm = *std::localtime(&now_c);
+
+        std::stringstream ss;
+        ss << std::put_time(&now_tm, "%Y-%m-%d %H:%M:%S");
+        return ss.str();
     }
 };
 

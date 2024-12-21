@@ -4,6 +4,7 @@
 #include "src/turbomind/engine/gateway.h"
 
 #include "src/turbomind/engine/request.h"
+#include "src/turbomind/utils/logger.h"
 
 namespace turbomind {
 
@@ -23,6 +24,7 @@ void RequestQueue::push(std::vector<std::shared_ptr<Request>> reqs)
 
 void RequestQueue::cancel(std::shared_ptr<Request> r)
 {
+    TM_LOG_WARNING("[RequestQueue] canncel request %llu", r->id);
     // -1 canceled
     //  0 queued
     //  1 active
