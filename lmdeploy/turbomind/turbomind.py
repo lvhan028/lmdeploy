@@ -346,6 +346,7 @@ class TurboMindInstance:
         self.model_inst = self._create_model_instance(0)
 
         self.config = config
+        self.done_event = None
 
     def _create_model_instance(self, device_id):
         model_inst = self.tm_model.model_comm.create_model_instance(device_id)
@@ -387,12 +388,13 @@ class TurboMindInstance:
     def async_end_cb(self, status: int):
 
         async def _signal():
-            print(f'session ended, status = {status}')
+            logger.warning(f'session ended, status = {status}')
             self.end_event.set()
 
         asyncio.run_coroutine_threadsafe(_signal(), self.event_loop)
 
     async def async_end(self, session_id):
+        logger.warning(f'async_end session_id {session_id}')
         await self.done_event.wait()
         self.end_event = asyncio.Event()
         self.event_loop = asyncio.get_running_loop()
@@ -400,7 +402,7 @@ class TurboMindInstance:
         await self.end_event.wait()
 
     def end_cb(self, status: int):
-        print(f'session ended, status = {status}')
+        logger.warning(f'session ended, status = {status}')
         self.end_event.set()
 
     def end(self):
@@ -409,13 +411,16 @@ class TurboMindInstance:
         self.model_inst.end(self.end_cb)
         self.end_event.wait()
 
-    def cancel(self, session_id: int, blocking: bool = True):
+    def cancel(self, session_id: int, blocking: bool = False):
+        logger.warning(f'cancel session_id {session_id}, blocking {blocking}')
         self.model_inst.cancel()
         if blocking:
             self.done_event.wait()
 
-    async def async_cancel(self, session_id: int, blocking: bool = True):
+    async def async_cancel(self, session_id: int, blocking: bool = False):
         """End the given session."""
+        logger.warning(
+            f'async_cancel session_id {session_id}, blocking {blocking}')
         if not self.is_canceled:
             self.model_inst.cancel()
             self.is_canceled = True
@@ -519,6 +524,10 @@ class TurboMindInstance:
 
     def async_signal_cb(self):
         coro = self.async_signal()
+        assert (
+            self.cond is not None and coro is not None
+            and self.event_loop is not None
+        ), f'cond {self.cond}, coro {coro}, event_loop {self.event_loop}'
         asyncio.run_coroutine_threadsafe(coro, self.event_loop)
 
     async def async_stream_infer(self,
@@ -549,8 +558,13 @@ class TurboMindInstance:
             kwargs (dict): kwargs for backward compatibility
         """
         self.event_loop = asyncio.get_running_loop()
-        self.cond = asyncio.Condition()
-        self.done_event = asyncio.Event()
+        if self.done_event is not None:
+            await self.done_event.wait()
+            self.done_event.clear()
+        else:
+            self.done_event = asyncio.Event()
+            self.cond = asyncio.Condition()
+
         self.is_canceled = False
         self.flag = 0
 
@@ -561,7 +575,7 @@ class TurboMindInstance:
             input_embeddings=input_embeddings,
             input_embedding_ranges=input_embedding_ranges,
             gen_config=gen_config)
-
+        logger.info(f'[async_stream_infer] session_id {session_id}')
         session = _tm.SessionParam(id=session_id,
                                    step=step,
                                    start=sequence_start,
@@ -622,6 +636,7 @@ class TurboMindInstance:
 
         except Exception as e:
             logger.error(e)
+            logger.error(f'self.cond {self.cond}')
             yield self._get_error_output()
 
         finally:
@@ -634,8 +649,8 @@ class TurboMindInstance:
                     self.flag = 0
                     state = shared_state.consume()
             self.done_event.set()
-            self.cond = None
-            self.event_loop = None
+            # self.cond = None
+            # self.event_loop = None
 
     def _get_error_output(self):
         return EngineOutput(status=ResponseType.INTERNAL_ENGINE_ERROR,
@@ -697,7 +712,7 @@ class TurboMindInstance:
             stream_output (bool): indicator for stream output
             kwargs (dict): kwargs for backward compatibility
         """
-
+        logger.info(f'[stream_infer] session_id {session_id}')
         gen_cfg = self._get_generation_config(gen_config)
 
         inputs, input_length = self.prepare_inputs(
@@ -785,7 +800,7 @@ class TurboMindInstance:
                     while not self.flag:
                         self.cond.wait()
                     state = shared_state.consume()
-            self.cond = None
+            # self.cond = None
 
     def decode(self,
                input_ids,
