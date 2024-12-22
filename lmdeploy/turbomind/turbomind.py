@@ -348,6 +348,9 @@ class TurboMindInstance:
         self.config = config
         self.done_event = None
 
+        self.cond = None
+        self.done_event = None
+
     def _create_model_instance(self, device_id):
         model_inst = self.tm_model.model_comm.create_model_instance(device_id)
         return model_inst
@@ -417,15 +420,22 @@ class TurboMindInstance:
         if blocking:
             self.done_event.wait()
 
-    async def async_cancel(self, session_id: int, blocking: bool = False):
+    def async_cancel_cb(self, status: int):
+
+        async def _signal():
+            logger.warning(f'session canceled, status = {status}')
+            self.cancel_event.set()
+
+        asyncio.run_coroutine_threadsafe(_signal(), self.event_loop)
+
+    async def async_cancel(self, session_id: int = None):
         """End the given session."""
-        logger.warning(
-            f'async_cancel session_id {session_id}, blocking {blocking}')
+        logger.warning(f'async_cancel session_id {session_id}')
         if not self.is_canceled:
-            self.model_inst.cancel()
+            self.cancel_event = asyncio.Event()
+            self.model_inst.cancel(self.async_cancel_cb)
             self.is_canceled = True
-        if blocking:
-            await self.done_event.wait()
+        await self.cancel_event.wait()
 
     def prepare_embeddings(self,
                            input_embeddings=None,
@@ -562,8 +572,8 @@ class TurboMindInstance:
             await self.done_event.wait()
             self.done_event.clear()
         else:
-            self.done_event = asyncio.Event()
             self.cond = asyncio.Condition()
+            self.done_event = asyncio.Event()
 
         self.is_canceled = False
         self.flag = 0
@@ -649,8 +659,7 @@ class TurboMindInstance:
                     self.flag = 0
                     state = shared_state.consume()
             self.done_event.set()
-            # self.cond = None
-            # self.event_loop = None
+            self.event_loop = None
 
     def _get_error_output(self):
         return EngineOutput(status=ResponseType.INTERNAL_ENGINE_ERROR,

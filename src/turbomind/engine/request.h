@@ -92,16 +92,21 @@ struct Request {
     // reference to IO tensors
     TensorMap inputs;
     TensorMap outputs;
+    // fast path for accessing common output buffers
+    Tensor output_ids;
+    Tensor sequence_length;
 
     std::function<void(int)> end_cb;
-    std::function<void()>    forward_cb;
 
-    std::atomic<int>                    cancel_flag;
+    std::function<void(int)> cancel_cb;
+    std::atomic<int>         cancel_flag;
+    bool                     is_canceled{};
+
+    std::function<void()> forward_cb;
+
     std::shared_ptr<AtomicRequestState> state;
 
-    bool is_canceled{};
-
-    int ec;
+    int ec;  // set when disabling conflicting requests
 
     enum {
         kOk       = 0,
