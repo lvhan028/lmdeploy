@@ -245,7 +245,7 @@ class AsyncEngine(LogitsMixin):
 
     async def stop_session(self, session_id: int):
         """Stop a session by a session_id."""
-        is_running = session_id in self.running_session_ids
+        is_running = (session_id in self.running_session_ids)
         logger.warning(f'stop session {session_id}, is_running {is_running}')
         if str(session_id) in self.id2generator:
             await self.id2generator[str(session_id)].async_cancel(session_id)
@@ -255,7 +255,7 @@ class AsyncEngine(LogitsMixin):
 
     async def end_session(self, session_id: int):
         """Clear a session by a session_id."""
-        is_running = session_id in self.running_session_ids
+        is_running = (session_id in self.running_session_ids)
         logger.warning(f'end session {session_id}, is_running {is_running}')
         if str(session_id) in self.id2generator:
             await self.id2generator[str(session_id)].async_end(session_id)
@@ -269,14 +269,19 @@ class AsyncEngine(LogitsMixin):
         """A context manager to make sure server's safe running."""
         try:
             yield
-        except (Exception, asyncio.CancelledError, GeneratorExit) as e:  # noqa
+        # except (Exception, asyncio.CancelledError, GeneratorExit) as e:  # noqa
+        except Exception as e:
             # TODO: find out why await would block the coroutine here
-            logger.error(f'got exception: {e}')
-            _get_event_loop().create_task(self.stop_session(session_id))
-            raise e
-        if str(session_id) in self.id2generator:
-            self.gens_set.add(self.id2generator[str(session_id)])
-        self.running_session_ids.discard(session_id)
+            logger.error(f'got exception: {type(e).__name__}, {e}')
+            # _get_event_loop().create_task(self.stop_session(session_id))
+            # raise e
+        finally:
+            logger.info(
+                f'[safe_run] return session_id {session_id} to generator and'
+                ' discard it from running set')
+            if str(session_id) in self.id2generator:
+                self.gens_set.add(self.id2generator[str(session_id)])
+            self.running_session_ids.discard(session_id)
 
     async def get_generator(self, stop: bool, session_id: int):
         """Only return the model instance if it is available."""
@@ -288,6 +293,8 @@ class AsyncEngine(LogitsMixin):
         generator = self.gens_set.pop()
         self.id2generator[str(session_id)] = generator
         self.running_session_ids.add(session_id)
+        logger.info(f'add session_id {session_id} to running set, is_running '
+                    f'{session_id in self.running_session_ids}')
         return generator
 
     def batch_infer(self,
