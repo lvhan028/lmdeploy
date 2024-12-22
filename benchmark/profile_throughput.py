@@ -1,7 +1,6 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import argparse
 import asyncio
-import csv
 import itertools
 import json
 import os

@@ -245,18 +245,20 @@ class AsyncEngine(LogitsMixin):
 
     async def stop_session(self, session_id: int):
         """Stop a session by a session_id."""
-        is_running = (session_id in self.running_session_ids)
+        is_running = (str(session_id) in self.id2generator)
         logger.warning(f'stop session {session_id}, is_running {is_running}')
         if str(session_id) in self.id2generator:
             await self.id2generator[str(session_id)].async_cancel(session_id)
+            self.free_gens.put_nowait(self.id2generator[str(session_id)])
 
     async def end_session(self, session_id: int):
         """Clear a session by a session_id."""
-        is_running = (session_id in self.running_session_ids)
+        is_running = (str(session_id) in self.id2generator)
         logger.warning(f'end session {session_id}, is_running {is_running}')
         if str(session_id) in self.id2generator:
             await self.id2generator[str(session_id)].async_end(session_id)
             self.id2step[str(session_id)] = 0
+            self.free_gens.put_nowait(self.id2generator[str(session_id)])
 
     @asynccontextmanager
     async def safe_run(self, session_id: Optional[int] = None):
@@ -267,13 +269,19 @@ class AsyncEngine(LogitsMixin):
             print(f'exception caught: {type(e).__name__}, {e}')
             # TODO: find out why await would block the coroutine here
             await self.stop_session(session_id)
+        is_running = (str(session_id) in self.id2generator)
+        logger.info(f'return generator, session_id {session_id}, is_running '
+                    f'{is_running}')
         if str(session_id) in self.id2generator:
             self.free_gens.put_nowait(self.id2generator[str(session_id)])
 
     async def get_generator(self, stop: bool, session_id: int):
         """Only return the model instance if it is available."""
         assert not stop, 'not implemented'
+        logger.info(
+            'try to get a generator, session_id {session_id}, stop {stop}')
         generator = await self.free_gens.get()
+        logger.info('get a generator successfully, session_id {session_id}')
         self.id2generator[str(session_id)] = generator
         return generator
 
