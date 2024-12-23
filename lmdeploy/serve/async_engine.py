@@ -245,6 +245,7 @@ class AsyncEngine(LogitsMixin):
 
     async def stop_session(self, session_id: int):
         """Stop a session by a session_id."""
+        logger.warning(f'[async_engine] end session {session_id}')
         generator = self.id2generator.get(self.id2generator)
         if generator:
             await generator.async_cancel(session_id)
@@ -253,13 +254,15 @@ class AsyncEngine(LogitsMixin):
     async def end_session(self, session_id: int):
         """For ending a session that is not running."""
         # TODO: wait for generator to finish `await generator.async_done()`
+        logger.warning(f'[async_engine] end session {session_id}')
         assert session_id not in self.id2generator
         generator = await self.free_gens.get()
         try:
             await generator.async_end(session_id)
             self.id2step[session_id] = 0
-        except (Exception, asyncio.CancelledError, GeneratorExit) as e:  # noqa
-            print(f'[end_session] exception caught: {e}')
+        except Exception as e:  # noqa
+            logger.error(
+                f'[end_session] exception caught: {type(e).__name__}, {e}')
         finally:
             self.free_gens.put_nowait(generator)
 
@@ -271,10 +274,12 @@ class AsyncEngine(LogitsMixin):
         self.id2generator[session_id] = generator
         try:
             yield generator
-        except (Exception, asyncio.CancelledError, GeneratorExit) as e:  # noqa
-            print(f'[safe_run] exception caught: {e}')
+        except Exception as e:  # noqa
+            logger.error(
+                f'[safe_run] exception caught: {type(e).__name__}, {e}')
             await generator.async_cancel(session_id)
         finally:
+            logger.info(f'return generator for session_id {session_id}')
             self.id2generator.pop(session_id)
             self.free_gens.put_nowait(generator)
 
@@ -599,7 +604,7 @@ class AsyncEngine(LogitsMixin):
                         state,
                         skip_special_tokens=gen_config.skip_special_tokens)
 
-                    res = res[ids_offset:]
+                    # res = res[ids_offset:]
                     logprobs = None
                     if outputs.logprobs:
                         log_offset = ids_offset - start_ids_offset
@@ -608,8 +613,8 @@ class AsyncEngine(LogitsMixin):
                     # response, history token len,
                     # input token len, gen token len
                     yield GenOut(response, self.id2step[session_id],
-                                 len(input_ids), tokens, finish_reason, res,
-                                 logprobs)
+                                 len(input_ids), tokens, finish_reason,
+                                 res[ids_offset:], logprobs)
                 if not is_error(outputs.status):
                     finish_reason = 'length' \
                         if tokens >= gen_config.max_new_tokens else 'stop'
