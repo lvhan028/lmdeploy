@@ -59,21 +59,19 @@ ModelRequest::ModelRequest(Gateway* gateway, int session_len, int vocab_size):
 {
 }
 
-void ModelRequest::Cancel(std::function<void(int)> cb)
+void ModelRequest::Cancel()
 {
     // request is finished if lock failed
     if (auto r = request_.lock()) {
-        // the cb will be synced to engine via release-acquire semantics
-        r->cancel_cb = std::move(cb);
         gateway_->cancel(std::move(r));
     }
 }
 
-void ModelRequest::End(std::function<void(int)> cb)
+void ModelRequest::End(std::function<void(int)> cb, uint64_t session_id)
 {
     auto r = std::make_shared<Request>();
 
-    r->id = r->session.id = session_id_;
+    r->id = r->session.id = session_id;
     r->session.kill_flag  = true;
 
     r->end_cb = std::move(cb);
