@@ -780,7 +780,7 @@ class TurboMindInstance:
                     while not self.flag:
                         self.cond.wait()
                     state = shared_state.consume()
-            # self.cond = None
+            self.cond = None
 
     def decode(self,
                input_ids,
