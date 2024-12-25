@@ -1,7 +1,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 
 from pathlib import Path
-from typing import Union
+from typing import Literal, Union
 
 import torch
 from torch import nn
@@ -205,6 +205,7 @@ def calibrate(model: str,
               w_bits: int = 4,
               w_group_size: int = 128,
               search_scale: bool = False,
+              dtype: Literal['float16', 'bfloat16', 'auto'] = 'auto',
               batch_size: int = 1) -> None:
     """The main function for loading the model and performing calibration on a
     given dataset.
@@ -225,6 +226,7 @@ def calibrate(model: str,
         w_group_size (int): Group size for weight quantization statistics.
         search_scale (bool): Whether search scale ratio. Default to False,
             which means only smooth quant with 0.5 ratio will be applied.
+        dtype (str): Data type for loading model weights and calib infer.
         batch_size (int): The batch size for running the calib samples.
             Low GPU mem requires small batch_size. Large batch_size
             reduces the calibration time while costs more VRAM.
