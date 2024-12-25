@@ -248,7 +248,7 @@ def calibrate(model: str,
 
     if model_type == 'llm':
         model = load_hf_from_pretrained(model,
-                                        torch_dtype=torch.float16,
+                                        dtype=dtype,
                                         trust_remote_code=True)
         vl_model = None
     elif model_type == 'vlm':
@@ -259,7 +259,11 @@ def calibrate(model: str,
         if hasattr(vl_model, 'llm'):  # MiniCPMV
             model = vl_model.llm
         model.config.use_cache = False
-        model.half().eval()
+        if dtype == 'float16':
+            model.half()
+        elif dtype == 'bfloat16':
+            model.to(torch.bfloat16)
+        model.eval()
 
     model_type = type(model).__name__
     if model_type not in LAYER_TYPE_MAP or model_type not in NORM_TYPE_MAP:
