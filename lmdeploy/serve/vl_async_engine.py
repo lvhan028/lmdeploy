@@ -185,19 +185,21 @@ class VLAsyncEngine(AsyncEngine):
         ])
         return out_messages
 
-    def batch_infer(self, prompts: Union[VLPromptType, List[Dict], List[VLPromptType], List[List[Dict]]], **kwargs):
+    def batch_infer(self, prompts: Union[VLPromptType, List[Dict], List[VLPromptType], List[List[Dict]]], *args,
+                    **kwargs):
         """Inference a batch of prompts."""
         prompts = self._convert_prompts(prompts)
-        return super().batch_infer(prompts, **kwargs)
+        return super().batch_infer(prompts, *args, **kwargs)
 
-    def stream_infer(self, prompts: Union[VLPromptType, List[Dict], List[VLPromptType], List[List[Dict]]], **kwargs):
+    def stream_infer(self, prompts: Union[VLPromptType, List[Dict], List[VLPromptType], List[List[Dict]]], *args,
+                     **kwargs):
         """Inference a batch of prompts with stream mode."""
         prompts = self._convert_prompts(prompts)
-        return super().stream_infer(prompts, **kwargs)
+        return super().stream_infer(prompts, *args, **kwargs)
 
-    def __call__(self, prompts: Union[VLPromptType, List[Dict], List[VLPromptType], List[List[Dict]]], **kwargs):
+    def __call__(self, prompts: Union[VLPromptType, List[Dict], List[VLPromptType], List[List[Dict]]], *args, **kwargs):
         """Inference a batch of prompts."""
-        return super().__call__(prompts, **kwargs)
+        return super().__call__(prompts, *args, **kwargs)
 
     def chat(self, prompts: VLPromptType, **kwargs):
         """chat."""

@@ -8,6 +8,7 @@ import json
 import os
 import random
 import re
+import time
 from contextlib import asynccontextmanager, closing
 from copy import deepcopy
 from functools import partial
@@ -281,7 +282,7 @@ class AsyncEngine(LogitsMixin):
 
         # parameters for member functions
         self.session_len = _get_and_verify_max_len(self.hf_tm_cfg, self.backend_config.session_len)
-        self.stop_words = _stop_words(self.chat_template.stop_words, self.engine.tokenizer)
+        self.stop_words = _stop_words(self.chat_template.stop_words, self.tokenizer)
         if self.stop_words is not None:
             self.stop_words = self.stop_words[0][0].tolist()
         self.backend = backend
@@ -612,6 +613,8 @@ class AsyncEngine(LogitsMixin):
             do_preprocess (bool): whether pre-process the messages. Default to
                 True, which means chat_template will be applied.
         """
+        logger.error(f'start generation for session {session_id}')
+        start = time.perf_counter()
         if (messages is not None) ^ (input_ids is None):
             raise ValueError('You must specify exactly one of messages or input_ids')
         if session_id not in self.id2step:
@@ -700,6 +703,7 @@ class AsyncEngine(LogitsMixin):
             start_ids_offset = state.ids_offset
             response = ''
             finish_reason = None
+            ttft = 0
             async with self.safe_run(inst,
                                      session_id=session_id,
                                      **prompt_input,
@@ -712,6 +716,9 @@ class AsyncEngine(LogitsMixin):
                 prev_len = 0
                 hit_stop_token = 0
                 async for outputs in gen:
+                    if ttft == 0:
+                        ttft = time.perf_counter() - start
+                        logger.error(f'session {session_id} ttft: {ttft:.3f} s')
                     # decode res
                     if is_error(outputs.status):
                         break

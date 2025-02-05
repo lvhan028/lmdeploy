@@ -45,7 +45,6 @@ class HuggingFaceTokenizer:
     def __init__(self, model_dir: str):
         self._check_transformers_version(model_dir)
         from transformers import AutoTokenizer
-        self.logger = get_logger('lmdeploy')
         self.model = AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
         self._prefix_space_tokens = None
 
@@ -391,6 +390,7 @@ class Tokenizer:
             self.model = ChatGLMTokenizer(model_path)
         else:
             self.model = HuggingFaceTokenizer(model_path)
+        self.logger = get_logger('lmdeploy')
 
     @property
     def vocab_size(self):

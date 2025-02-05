@@ -616,7 +616,8 @@ class InternVL2_5(InternLM2Chat7B):
 
     def __init__(
             self,
-            meta_instruction='你是书生·万象，英文名是InternVL，是由上海人工智能实验室、清华大学及多家合作单位联合开发的多模态大语言模型。',  # noqa
+            # meta_instruction='你是书生·万象，英文名是InternVL，是由上海人工智能实验室、清华大学及多家合作单位联合开发的多模态大语言模型。',  # noqa
+            meta_instruction='',
             **kwargs):
         super().__init__(meta_instruction=meta_instruction, **kwargs)
 
