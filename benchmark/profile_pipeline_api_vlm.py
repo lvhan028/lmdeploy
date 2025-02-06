@@ -50,8 +50,7 @@ def sample_requests(dataset_path: str, num_requests: int, tokenizer) -> List[Tup
         if prompt_len > 1024 or prompt_len + output_len > 2048:
             # Prune too long sequences.
             continue
-        # filtered_dataset.append((prompt, prompt_len, output_len))
-        filtered_dataset.append((prompt, prompt_len, 1))
+        filtered_dataset.append((prompt, prompt_len, output_len))
 
     # Sample the requests.
     sampled_requests = random.sample(filtered_dataset, num_requests)
