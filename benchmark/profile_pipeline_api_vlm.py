@@ -158,7 +158,7 @@ def parse_args():
     parser.add_argument('--resolution',
                         type=str,
                         choices=['random', 'stable'],
-                        default='stable',
+                        default='random',
                         help='image resolution')
     parser.add_argument('--width', type=int, default=448, help='the width of an image')
     parser.add_argument('--height', type=int, default=448, help='the height of an image')
