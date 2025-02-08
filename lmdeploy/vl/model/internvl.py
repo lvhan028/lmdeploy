@@ -200,7 +200,8 @@ class InternVLVisionModel(VisonModel):
             outputs.append(
                 dict(pixel_values=pixel_values, image_tokens=image_tokens, image_token_id=0, image_size=image.size))
             end = time.perf_counter()
-            logger.error(f'preprocessing cost {(end-start):.3f} s, image_size ({image.width}, {image.height})')
+            logger.error(f'preprocessing cost {(end-start):.3f} s, image_size ({image.width}, {image.height}), '
+                         f'image_token {image_tokens}')
             start = end
         messages.append(dict(role='preprocess', content=outputs))
         return messages

@@ -1,5 +1,6 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 
+import time
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import torch
@@ -13,10 +14,13 @@ from lmdeploy.pytorch.multimodal.data_type import MultiModalTensor
 from lmdeploy.pytorch.nn import LayerNorm, RMSNorm
 from lmdeploy.pytorch.nn.linear import build_colwise_linear, build_qkv_proj, build_rowwise_linear
 from lmdeploy.pytorch.weight_loader.model_weight_loader import load_weight
+from lmdeploy.utils import get_logger
 
 from .patch import build_model_from_hf_config
 from .utils.cudagraph import CudaGraphMixin
 from .utils.model import DeployModelMixin
+
+logger = get_logger('lmdeploy')
 
 
 class InternVisionEmbeddings(nn.Module):
@@ -350,7 +354,9 @@ class InternVLChatModel(nn.Module, DeployModelMixin, CudaGraphMixin):
     ):
         if inputs_embeds is None and pixel_values is not None:
             # extract feature
+            start = time.perf_counter()
             vit_embeds = self.extract_feature(pixel_values)
+            logger.error(f'forward cost {(time.perf_counter() - start):.3f} s')
             lang_embeds = self.language_model.get_input_embeddings()(input_ids)
             lang_embeds.masked_scatter_(image_mask[..., None], vit_embeds)
 
