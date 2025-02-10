@@ -201,10 +201,10 @@ class VLAsyncEngine(AsyncEngine):
         """Inference a batch of prompts."""
         return super().__call__(prompts, *args, **kwargs)
 
-    def chat(self, prompts: VLPromptType, **kwargs):
+    def chat(self, prompts: VLPromptType, *args, **kwargs):
         """chat."""
         _prompts = self._convert_prompts(prompts)
-        sess = super().chat(_prompts, **kwargs)
+        sess = super().chat(_prompts, *args, **kwargs)
 
         # recover prompts & history
         sess._prompt = prompts
