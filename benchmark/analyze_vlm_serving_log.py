@@ -23,7 +23,7 @@ def analyze_preprocess(content):
 def analyze_vision_forward(content):
     pattern = r'forward cost (\d+\.\d+) s'
     matches = re.findall(pattern, content)
-    costs = [float(match[0]) for match in matches]
+    costs = [float(match) for match in matches]
     ave_cost = np.average(costs)
     print(f'vision forward average cost: {ave_cost:.3f} s')
 
