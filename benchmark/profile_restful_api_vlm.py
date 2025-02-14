@@ -221,16 +221,20 @@ async def async_request_openai_completions(
         messages = [{
             'role':
             'user',
-            'content': [{
-                'type': 'text',
-                'text': 'describe the image'
-            }, {
-                'type': 'image_url',
-                'image_url': {
-                    'url': f'data:image/jpeg;base64,{get_image()}',
-                    'max_dynamic_patch': 12
+            'content': [
+                {
+                    'type': 'text',
+                    'text': 'describe the image'
+                    # 'text': prompt
+                },
+                {
+                    'type': 'image_url',
+                    'image_url': {
+                        'url': f'data:image/jpeg;base64,{get_image()}',
+                        'max_dynamic_patch': 12
+                    }
                 }
-            }]
+            ]
         }]
         payload = {
             'model': request_func_input.model,
