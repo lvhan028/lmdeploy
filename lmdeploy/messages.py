@@ -181,11 +181,11 @@ class TurbomindEngineConfig:
             signifying the percentage of FREE GPU memory to be reserved for
             the k/v cache
         cache_chunk_size (int): The policy to apply for KV block from
-            the block manager, default to -1. Suppose the max number of kv
+            the block manager, default to -1. Assume the max number of kv
             cache block is $$X$$,
-            0: malloc kv chunk $$sqrt(X)$$ at a time
-            -1: malloc kv chunk $$X$$ at a time
-            positive integer: malloc `cache_chunk_size` blocks at a time
+            0: malloc kv block if size $$sqrt(X)$$ each time
+            -1: malloc the entire kv cache of size $$X$$ in one go
+            positive integer: malloc kv cache block of size `cache_chunk_size` at a time
         cache_block_seq_len (int): the length of the token sequence in
             a k/v block, default to 64
         enable_prefix_caching (bool): enable cache prompts for block reuse,
