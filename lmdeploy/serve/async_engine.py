@@ -8,7 +8,6 @@ import json
 import os
 import random
 import re
-import time
 from contextlib import asynccontextmanager, closing
 from copy import deepcopy
 from functools import partial
@@ -295,7 +294,7 @@ class AsyncEngine(LogitsMixin):
         self.request_logger = RequestLogger(max_log_len)
         self.internal_thread = _EventLoopThread(daemon=True)
         self.limiter: asyncio.Semaphore = None
-        self.preprocess_token: asyncio.Semaphore = None
+        # self.preprocess_token: asyncio.Semaphore = None
 
     def close(self):
         self.internal_thread.close()
@@ -614,8 +613,6 @@ class AsyncEngine(LogitsMixin):
             do_preprocess (bool): whether pre-process the messages. Default to
                 True, which means chat_template will be applied.
         """
-        logger.error(f'start generation for session {session_id}')
-        start = time.perf_counter()
         if (messages is not None) ^ (input_ids is None):
             raise ValueError('You must specify exactly one of messages or input_ids')
         if session_id not in self.id2step:
@@ -647,12 +644,12 @@ class AsyncEngine(LogitsMixin):
             logger.ERROR(f"n({gen_config.n}) > 1 hasn't been supported yet. "
                          f'Fallback to 1')
             gen_config.n = 1
-        release_preprocess_token = False
+        # release_preprocess_token = False
         if messages:
-            if self.preprocess_token is None:
-                self.preprocess_token = asyncio.Semaphore(4)
-            release_preprocess_token = True
-            await self.preprocess_token.acquire()
+            # if self.preprocess_token is None:
+            #     self.preprocess_token = asyncio.Semaphore(4)
+            # release_preprocess_token = True
+            # await self.preprocess_token.acquire()
             prompt = messages
             self.request_logger.log_prompt(session_id=session_id, prompt=prompt)
             prompt_input = await self._get_prompt_input(prompt,
@@ -709,7 +706,6 @@ class AsyncEngine(LogitsMixin):
             start_ids_offset = state.ids_offset
             response = ''
             finish_reason = None
-            ttft = 0
             async with self.safe_run(inst,
                                      session_id=session_id,
                                      **prompt_input,
@@ -719,14 +715,11 @@ class AsyncEngine(LogitsMixin):
                                      sequence_start=sequence_start,
                                      sequence_end=sequence_end,
                                      step=history_len) as gen:
-                if release_preprocess_token:
-                    self.preprocess_token.release()
+                # if release_preprocess_token:
+                #     self.preprocess_token.release()
                 prev_len = 0
                 hit_stop_token = 0
                 async for outputs in gen:
-                    if ttft == 0:
-                        ttft = time.perf_counter() - start
-                        logger.error(f'session {session_id} ttft: {ttft:.3f} s')
                     # decode res
                     if is_error(outputs.status):
                         break

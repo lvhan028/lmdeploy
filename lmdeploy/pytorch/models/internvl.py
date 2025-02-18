@@ -356,7 +356,7 @@ class InternVLChatModel(nn.Module, DeployModelMixin, CudaGraphMixin):
             # extract feature
             start = time.perf_counter()
             vit_embeds = self.extract_feature(pixel_values)
-            logger.error(f'forward cost {(time.perf_counter() - start):.3f} s, pixel_values.shape {pixel_values.shape}')
+            logger.warning(f'forward cost {(time.perf_counter() - start):.3f} s, size {pixel_values.shape}')
             lang_embeds = self.language_model.get_input_embeddings()(input_ids)
             lang_embeds.masked_scatter_(image_mask[..., None], vit_embeds)
 

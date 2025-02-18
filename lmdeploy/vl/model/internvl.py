@@ -198,11 +198,10 @@ class InternVLVisionModel(VisonModel):
             pixel_values = self.processor(image, params)
             image_tokens = (pixel_values.shape[0] * self.image_tokens_per_patch)
             outputs.append(
-                dict(pixel_values=pixel_values, image_tokens=image_tokens, image_token_id=151652,
-                     image_size=image.size))
+                dict(pixel_values=pixel_values, image_tokens=image_tokens, image_token_id=0, image_size=image.size))
             end = time.perf_counter()
-            logger.error(f'preprocessing cost {(end-start):.3f} s, image_size ({image.width}, {image.height}), '
-                         f'image_token {image_tokens}')
+            logger.warning(f'preprocessing cost {(end-start):.3f} s, image_size ({image.width}, {image.height}), '
+                           f'image_token {image_tokens}')
             start = end
         messages.append(dict(role='preprocess', content=outputs))
         return messages
@@ -225,7 +224,7 @@ class InternVLVisionModel(VisonModel):
         outputs = self._forward_func(inputs, max_batch_size)
         messages.append(dict(role='forward', content=outputs))
         end = time.perf_counter()
-        logger.error(f'forward cost {(end - start):.3f} s')
+        logger.warning(f'forward cost {(end - start):.3f} s, size {len(inputs)}')
         return messages
 
     @staticmethod
