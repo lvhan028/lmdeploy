@@ -97,7 +97,17 @@ class TurboMind:
             _engine_config.max_batch_size = get_max_batch_size('cuda')
         assert _engine_config.max_batch_size > 0, 'max_batch_size should be' \
             f' greater than 0, but got {_engine_config.max_batch_size}'
-
+        if _engine_config.cache_max_entry_count > 1:
+            # when cache_max_entry_count > 1, it represents the max token number
+            # that the entire kv cache can hold.
+            # We divide it by cache_block_seq_len to determine the max kv
+            # block number that the kv cache can occupy.
+            _count = _engine_config.cache_max_entry_count
+            _engine_config.cache_max_entry_count = (_count + _engine_config.cache_block_seq_len -
+                                                    1) // _engine_config.cache_block_seq_len
+            logger.warning(f'User specifies kv cache capacity {_count} tokens, '
+                           f'block_seq_len {_engine_config.cache_block_seq_len}, '
+                           f'indicating {_engine_config.cache_max_entry_count} kv blocks')
         self.gpu_count = _engine_config.tp
 
         self.tokenizer = tokenizer

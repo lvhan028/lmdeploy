@@ -375,13 +375,17 @@ class EngineOutput:
 
     Args:
         status (ResponseType): the response type.
+        finish_reason (str): 'length', or 'stop' or ''
         token_ids (List[int]): the output token ids.
         num_token (int): the length of output token, for turbomind, num_token
             may not equal to the length of token_ids
         logprobs (List[Dict[int, float]]): the top logprobs for each output
-            position.
+            position
+        logits (torch.tensor): the output of lm_head without performing softmax
+        last_hidden_state (torch.tensor): the output hidden state of the last transformer layer
     """
     status: ResponseType
+    finish_reason: str
     token_ids: List[int]
     num_token: int
     logprobs: List[Dict[int, float]] = None

@@ -141,11 +141,11 @@ void LlamaTritonModel<T>::handleMissingParams()
                        attn_param_.cache_block_seq_len);
     }
 
-    if (!engine_param_.cache_chunk_size) {
-        engine_param_.cache_chunk_size = engine_param_.cache_max_block_count;
-        TM_LOG_WARNING("[LlamaTritonModel] `cache_chunk_size` is not set, default to %d.",
-                       (int)engine_param_.cache_chunk_size);
-    }
+    // if (!engine_param_.cache_chunk_size) {
+    //     engine_param_.cache_chunk_size = engine_param_.cache_max_block_count;
+    //     TM_LOG_WARNING("[LlamaTritonModel] `cache_chunk_size` is not set, default to %d.",
+    //                    (int)engine_param_.cache_chunk_size);
+    // }
 
     if (!engine_param_.num_tokens_per_iter) {
         engine_param_.num_tokens_per_iter = engine_param_.max_context_token_num;

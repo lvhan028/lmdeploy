@@ -45,7 +45,7 @@ BlockManager::BlockManager(
         chunk_size_ = max_block_count_;
     }
     else {
-        chunk_size_ = chunk_size;
+        chunk_size_ = chunk_size < max_block_count_ ? chunk_size : max_block_count_;
     }
 
     TM_LOG_WARNING("[BlockManager] block_size = %lu MB", (unsigned long)block_size_ >> 20);
