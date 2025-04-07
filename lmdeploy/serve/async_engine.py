@@ -21,29 +21,12 @@ from lmdeploy import Tokenizer
 from lmdeploy.archs import get_model_arch
 from lmdeploy.logger import RequestLogger
 from lmdeploy.messages import GenerationConfig, PytorchEngineConfig, Response, ResponseType, TurbomindEngineConfig
-from lmdeploy.model import MODELS, ChatTemplateConfig, best_match_model
+from lmdeploy.model import MODELS, ChatTemplateConfig
 from lmdeploy.serve.utils import LogitsMixin
 from lmdeploy.tokenizer import DetokenizeState
 from lmdeploy.utils import _get_and_verify_max_len, _stop_words, get_hf_gen_cfg, get_logger
 
 logger = get_logger('lmdeploy')
-
-
-def get_names_from_model(model_path: str, model_name: str = None):
-    """Get model name and chat template name from workspace model."""
-    triton_model_path = os.path.join(model_path, 'triton_models', 'weights')
-    if not os.path.exists(triton_model_path):
-        chat_template_name = best_match_model(model_path)
-    else:
-        # `model_path` refers to a turbomind model, reading
-        # chat_template_name from the config
-        config_path = os.path.join(triton_model_path, 'config.yaml')
-        with open(config_path, 'r') as f:
-            import yaml
-            config = yaml.safe_load(f)
-        chat_template_name = config['model_config']['chat_template']
-    model_name = model_name if model_name else model_path
-    return model_name, chat_template_name
 
 
 @dataclasses.dataclass
@@ -241,16 +224,10 @@ class AsyncEngine(LogitsMixin):
         logger.info(f'input backend={backend}, backend_config={backend_config}')
         logger.info(f'input chat_template_config={chat_template_config}')
 
-        self.model_name, chat_template_name = get_names_from_model(model_path, model_name)
-        if chat_template_config is None:
-            chat_template_config = ChatTemplateConfig(chat_template_name)
-        elif chat_template_config.model_name is None:
-            chat_template_config.model_name = chat_template_name
-        self.chat_template = chat_template_config.chat_template
-
-        logger.info(f'updated chat_template_onfig={chat_template_config}')
-
+        self.model_name = model_name or model_path
         self.tokenizer = Tokenizer(model_path)
+        # get chat template after loading tokenizer model since it depends on the tokenizer
+        self.chat_template = self.get_chat_template(model_path, chat_template_config)
         self.hf_gen_cfg = get_hf_gen_cfg(model_path)
         self.arch, _ = get_model_arch(model_path)
 
@@ -865,3 +842,29 @@ class AsyncEngine(LogitsMixin):
             session.generator = None
 
         return session
+
+    def get_chat_template(self, model_path: str, chat_template_config: ChatTemplateConfig = None):
+        """Get chat template.
+
+        Args:
+            model_path(str): the path of a model
+            chat_template_config(ChatTemplateConfig): config about chat template
+        """
+        if chat_template_config:
+            return chat_template_config.chat_template
+        else:
+            triton_model_path = os.path.join(model_path, 'triton_models', 'weights')
+            if os.path.exists(triton_model_path):
+                # `model_path` refers to a turbomind model, reading
+                # chat_template_name from the config
+                config_path = os.path.join(triton_model_path, 'config.yaml')
+                with open(config_path, 'r') as f:
+                    import yaml
+                    config = yaml.safe_load(f)
+                chat_template_name = config['model_config']['chat_template']
+                chat_template_config = ChatTemplateConfig(model_name=chat_template_name)
+                return chat_template_config.chat_template
+            else:
+                # hf model
+                from model import HfChatTemplate
+                return HfChatTemplate(self.tokenizer)

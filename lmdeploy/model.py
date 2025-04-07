@@ -1,9 +1,10 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import dataclasses
 import json
+import os
 import uuid
 from abc import abstractmethod
-from typing import List, Literal, Optional, Union
+from typing import Callable, Dict, List, Literal, Optional, Union
 
 from mmengine import Registry
 
@@ -118,12 +119,10 @@ class BaseModel:
     @abstractmethod
     def messages2prompt(self, messages, sequence_start=True, **kwargs):
         """Return the prompt that is concatenated with other elements in the
-        chat template. When messages arg is a string, return
-        self.get_prompt(messages). When messages arg is a chat history, return
-        translated prompt from chat history.
+        chat template.
 
         Args:
-            messages (str | List): user's input prompt
+            messages (List): user's input prompt
         Returns:
             str: the concatenated prompt
         """
@@ -262,14 +261,7 @@ class Vicuna(BaseChatTemplate):
                          stop_words=stop_words,
                          **kwargs)
 
-    def get_prompt(self, prompt, sequence_start=True):
-        if self.capability == 'chat':
-            return super().get_prompt(prompt, sequence_start)[:-1]
-        return super().get_prompt(prompt, sequence_start)
-
     def messages2prompt(self, messages, sequence_start=True, **kwargs):
-        if isinstance(messages, str):
-            return self.get_prompt(messages, sequence_start)
         return super().messages2prompt(messages, sequence_start, **kwargs)[:-1]
 
 
@@ -357,8 +349,6 @@ class InternLM2Chat7B(InternLMChat7B):
         Returns:
             str: the concatenated prompt
         """
-        if isinstance(messages, str):
-            return self.get_prompt(messages, sequence_start)
         box_map = dict(user=self.user,
                        assistant=self.assistant,
                        system=self.system,
@@ -558,11 +548,6 @@ class Llama3(BaseChatTemplate):
                          stop_words=stop_words,
                          **kwargs)
 
-    def get_prompt(self, prompt, sequence_start=True):
-        if sequence_start:
-            return '<|begin_of_text|>' + super().get_prompt(prompt, sequence_start)
-        return super().get_prompt(prompt, sequence_start)
-
     def messages2prompt(self, messages, sequence_start=True, **kwargs):
         if sequence_start and not isinstance(messages, str):
             return '<|begin_of_text|>' + super().messages2prompt(messages, sequence_start, **kwargs)
@@ -625,8 +610,6 @@ Reminder:
         Returns:
             str: the concatenated prompt
         """
-        if isinstance(messages, str):
-            return self.get_prompt(messages, sequence_start)
         box_map = dict(user=self.user,
                        ipython=self.ipython,
                        tool=self.ipython,
@@ -736,8 +719,6 @@ class Qwen2d5Chat(Qwen7BChat):
         Returns:
             str: the concatenated prompt
         """
-        if isinstance(messages, str):
-            return self.get_prompt(messages, sequence_start)
         box_map = dict(user=self.user, assistant=self.assistant, system=self.system)
         ret = ''
         tool_prompt = ''
@@ -801,8 +782,6 @@ class QwQ(Qwen2d5Chat):
         super().__init__(meta_instruction=meta_instruction, **kwargs)
 
     def messages2prompt(self, messages, sequence_start=True, tools=None, **kwargs):
-        if isinstance(messages, str):
-            return self.get_prompt(messages, sequence_start)
         return super().messages2prompt(messages, sequence_start, tools, **kwargs) + '<think>\n'
 
 
@@ -821,14 +800,6 @@ class CodeLlama(Llama2):
         if self.capability == 'infilling':
             if self.stop_words is None:
                 self.stop_words = ['<EOT>']
-
-    def get_prompt(self, prompt, sequence_start=True):
-        if self.capability == 'infilling':
-            return self._infill_prompt(prompt)
-        elif self.capability == 'chat':
-            return super().get_prompt(prompt, sequence_start)
-        else:  # python speicalist
-            return prompt
 
     def _infill_prompt(self, prompt):
         prefix, suffix = prompt.split('<FILL>')
@@ -859,21 +830,8 @@ class ChatGLM2(BaseModel):
         self._eoa = eoa
         self.count = 0
 
-    def get_prompt(self, prompt, sequence_start=True):
-        """get prompt."""
-        # need more check
-        # https://github.com/THUDM/ChatGLM2-6B/issues/48
-        # [64790, 64792] to be prepended
-        self.count += 1
-        ret = f'[Round {self.count}]\n\n'
-        ret += f'{self._user}{prompt}{self._eoh}'
-        ret += f'{self._assistant}'
-        return ret
-
     def messages2prompt(self, messages, sequence_start=True, **kwargs):
         """message to prompt."""
-        if isinstance(messages, str):
-            return self.get_prompt(messages, sequence_start)
         ret = ''
         count = 0
         for message in messages:
@@ -1012,14 +970,7 @@ class Deepseek(BaseChatTemplate):
                  **kwargs):
         super().__init__(eosys=eosys, user=user, eoh=eoh, assistant=assistant, eoa=eoa, **kwargs)
 
-    def get_prompt(self, prompt, sequence_start=True):
-        if self.capability == 'chat':
-            return super().get_prompt(prompt, sequence_start)[:-1]
-        return super().get_prompt(prompt, sequence_start)
-
     def messages2prompt(self, messages, sequence_start=True, **kwargs):
-        if isinstance(messages, str):
-            return self.get_prompt(messages, sequence_start)
         return super().messages2prompt(messages, sequence_start, **kwargs)[:-1]
 
 
@@ -1029,14 +980,7 @@ class InternVLZH(BaseChatTemplate):
     def __init__(self, user='<human>: ', eoh=' ', assistant='<bot>: ', eoa='</s>', **kwargs):
         super().__init__(user=user, eoh=eoh, assistant=assistant, eoa=eoa, **kwargs)
 
-    def get_prompt(self, prompt, sequence_start=True):
-        if self.capability == 'chat':
-            return super().get_prompt(prompt, sequence_start)[:-1]
-        return super().get_prompt(prompt, sequence_start)
-
     def messages2prompt(self, messages, sequence_start=True, **kwargs):
-        if isinstance(messages, str):
-            return self.get_prompt(messages, sequence_start)
         return super().messages2prompt(messages, sequence_start, **kwargs)[:-1]
 
 
@@ -1060,14 +1004,7 @@ class DeepseekVL(BaseChatTemplate):
                          eoa=eoa,
                          **kwargs)
 
-    def get_prompt(self, prompt, sequence_start=True):
-        if self.capability == 'chat':
-            return super().get_prompt(prompt, sequence_start)[:-1]
-        return super().get_prompt(prompt, sequence_start)
-
     def messages2prompt(self, messages, sequence_start=True, **kwargs):
-        if isinstance(messages, str):
-            return self.get_prompt(messages, sequence_start)
         return super().messages2prompt(messages, sequence_start, **kwargs)[:-1]
 
     @classmethod
@@ -1101,12 +1038,7 @@ class DeepseekVL2(BaseChatTemplate):
                          eoa=eoa,
                          **kwargs)
 
-    def get_prompt(self, prompt, sequence_start=True):
-        return super().get_prompt(prompt, sequence_start)[:-1]
-
     def messages2prompt(self, messages, sequence_start=True, **kwargs):
-        if isinstance(messages, str):
-            return self.get_prompt(messages, sequence_start)
         return super().messages2prompt(messages, sequence_start, **kwargs)[:-1]
 
     @classmethod
@@ -1369,22 +1301,6 @@ class ChatGLM3(BaseChatTemplate):
                          **kwargs)
         self.start = '[gMASK]sop'
 
-    def get_prompt(self, prompt, sequence_start=True):
-        """Return the prompt that is concatenated with other elements in the
-        chat template.
-
-        Args:
-            prompt (str): user's input prompt
-            sequence_start (bool): indicator for the first round chat of a
-               session sequence
-        Returns:
-            str: the concatenated prompt
-        """
-        prompt = super().get_prompt(prompt, sequence_start)
-        if sequence_start:
-            prompt = self.start + prompt
-        return prompt
-
     def messages2prompt(self, messages, sequence_start=True, **kwargs):
         """Return the prompt that is concatenated with other elements in the
         chat template.
@@ -1394,8 +1310,6 @@ class ChatGLM3(BaseChatTemplate):
         Returns:
             str: the concatenated prompt
         """
-        if isinstance(messages, str):
-            return self.get_prompt(messages, sequence_start)
         return self.start + super().messages2prompt(messages, sequence_start, **kwargs)
 
     @classmethod
@@ -1510,3 +1424,23 @@ class Molmo(BaseChatTemplate):
                          separator=separator,
                          stop_words=stop_words,
                          **kwargs)
+
+
+class HfChatTemplate:
+
+    def __init__(self, tokenizer):
+        self.tokenizer = tokenizer
+
+    def messages2prompt(self,
+                        messages: Union[List[Dict[str, str]], List[List[Dict[str, str]]]],
+                        tools: Optional[List[Union[Dict, Callable]]] = None,
+                        jinja_chat_template: str = None,
+                        **kwargs):
+        """"""
+        return self.tokenizer.apply_chat_template(
+            conversation=messages,
+            tools=tools,
+            chat_template=jinja_chat_template,
+            tokenize=False,
+            **kwargs,
+        )
