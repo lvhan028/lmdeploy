@@ -4,7 +4,6 @@ import asyncio
 import atexit
 import concurrent.futures
 import dataclasses
-import os
 import random
 from contextlib import asynccontextmanager, closing
 from copy import deepcopy
@@ -850,7 +849,7 @@ class AsyncEngine(LogitsMixin):
 
         return session
 
-    def get_chat_template(self, model_path: str, chat_template_config: ChatTemplateConfig = None):
+    def get_chat_template(self, chat_template_config: ChatTemplateConfig = None):
         """Get chat template.
 
         Args:
@@ -860,18 +859,5 @@ class AsyncEngine(LogitsMixin):
         if chat_template_config:
             return chat_template_config.chat_template
         else:
-            triton_model_path = os.path.join(model_path, 'triton_models', 'weights')
-            if os.path.exists(triton_model_path):
-                # `model_path` refers to a turbomind model, reading
-                # chat_template_name from the config
-                config_path = os.path.join(triton_model_path, 'config.yaml')
-                with open(config_path, 'r') as f:
-                    import yaml
-                    config = yaml.safe_load(f)
-                chat_template_name = config['model_config']['chat_template']
-                chat_template_config = ChatTemplateConfig(model_name=chat_template_name)
-                return chat_template_config.chat_template
-            else:
-                # hf model
-                from model import HfChatTemplate
-                return HfChatTemplate(self.tokenizer)
+            from model import HfChatTemplate
+            return HfChatTemplate(self.tokenizer)

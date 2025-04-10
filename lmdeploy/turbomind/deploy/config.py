@@ -38,7 +38,6 @@ def config_to_dict(config):
 @dataclass
 class ModelConfig:
     model_name: str = ''
-    chat_template: str = ''
     model_arch: str = None
     head_num: int = None
     kv_head_num: int = None

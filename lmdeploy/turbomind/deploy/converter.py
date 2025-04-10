@@ -8,7 +8,6 @@ import torch
 
 from lmdeploy.archs import get_model_arch, search_nested_config
 from lmdeploy.messages import TurbomindEngineConfig
-from lmdeploy.model import MODELS, best_match_model
 from lmdeploy.utils import get_logger, get_model
 
 from ...utils import _get_and_verify_max_len, is_bf16_supported
@@ -156,7 +155,6 @@ def pack_model_repository(workspace_path: str):
 
 def get_tm_model(model_path,
                  model_name,
-                 chat_template_name,
                  engine_config: TurbomindEngineConfig,
                  group_size: int = None,
                  out_dir: str = None) -> BaseOutputModel:
@@ -167,8 +165,6 @@ def get_tm_model(model_path,
             to be a local path, or huggingface hub repo_id, or modelscope
             hub repo_id
         model_name (str): user customized model name
-        chat_template_name (str): the name of the chat template of
-            the input model
         engine_config(TurbomindEngineConfig): user input engine config
         group_size(int): refers to the group_size if the input model
             is a w4a16(awq or gptq) quantized model
@@ -225,7 +221,6 @@ def get_tm_model(model_path,
             dtype=engine_config.dtype,
             group_size=group_size)
 
-    tm_cfg.model_config.chat_template = chat_template_name
     tm_cfg.model_config.model_name = model_name
 
     tm_cfg.model_config.attn_tp_size = engine_config.attn_tp_size
@@ -243,7 +238,6 @@ def main(model_name: str,
          model_path: str,
          model_format: str = 'hf',
          dtype: str = 'auto',
-         chat_template: str = None,
          tokenizer_path: str = None,
          dst_path: str = 'workspace',
          tp: int = 1,
@@ -265,7 +259,6 @@ def main(model_name: str,
             one of the following values, ['auto', 'float16', 'bfloat16']
             The `auto` option will use FP16 precision for FP32 and FP16
             models, and BF16 precision for BF16 models.
-        chat_template (str): the name of the built-in chat template.
         tokenizer_path (str): the path of tokenizer model
         dst_path (str): the destination path that saves outputs
         tp (int): the number of GPUs used for tensor parallelism, should be 2^n
@@ -279,11 +272,6 @@ def main(model_name: str,
             default to the default cache directory of huggingface.
         kwargs (dict): other params for convert
     """
-    if chat_template is None:
-        chat_template = best_match_model(model_path)
-    assert chat_template in MODELS.module_dict.keys(), \
-        f"chat template '{chat_template}' is not a built-in template. " \
-        f'The built-ins are: {MODELS.module_dict.keys()}'
     assert is_supported(model_path), (f'turbomind does not support {model_path}. '
                                       'Plz try pytorch engine instead.')
 
@@ -306,7 +294,7 @@ def main(model_name: str,
     copy_tokenizer(model_path, tokenizer_path, tm_tokenizer_path)
     engine_config = TurbomindEngineConfig(tp=tp, device_num=tp, model_format=model_format, dtype=dtype)
     update_parallel_config(engine_config)
-    tm_model = get_tm_model(model_path, model_name, chat_template, engine_config, group_size, tm_weight_path)
+    tm_model = get_tm_model(model_path, model_name, engine_config, group_size, tm_weight_path)
     tm_model.export()
 
 

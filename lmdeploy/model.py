@@ -182,6 +182,16 @@ class BaseChatTemplate(BaseModel):
         ret += f'{self.assistant}'
         return ret
 
+    def apply_chat_template(self, messages, **kwargs):
+        """Apply the chat template to the messages.
+
+        Args:
+            messages (str | List): user's input prompt
+        Returns:
+            str: the concatenated prompt
+        """
+        return self.messages2prompt(messages, **kwargs)
+
 
 @MODELS.register_module(name=['deepseek-v3'])
 class DeepseekV3(BaseChatTemplate):
