@@ -48,7 +48,6 @@ class VLAsyncEngine(AsyncEngine):
     async def _get_prompt_input(self,
                                 messages: Union[str, List[Dict]],
                                 do_preprocess: bool,
-                                sequence_start: bool,
                                 adapter_name: str,
                                 tools: Optional[List[object]] = None,
                                 **kwargs):
@@ -59,15 +58,13 @@ class VLAsyncEngine(AsyncEngine):
         the argument specification.
         """
         if isinstance(messages, str):
-            return await super()._get_prompt_input(messages, do_preprocess, sequence_start, adapter_name, tools,
-                                                   **kwargs)
+            return await super()._get_prompt_input(messages, do_preprocess, adapter_name, tools, **kwargs)
         elif isinstance(messages, List):
             has_multimodal_input = any(
                 isinstance(message['content'], list) and any(item['type'] in ['image_url', 'image_data']
                                                              for item in message['content']) for message in messages)
             if not has_multimodal_input:
-                return await super()._get_prompt_input(messages, do_preprocess, sequence_start, adapter_name, tools,
-                                                       **kwargs)
+                return await super()._get_prompt_input(messages, do_preprocess, adapter_name, tools, **kwargs)
         else:
             raise RuntimeError(f'unsupported messages {messages}')
 
@@ -80,13 +77,11 @@ class VLAsyncEngine(AsyncEngine):
             # embedding_ranges and so on. All the returned values are passed
             # to tm engine for token generation
             results = await self.vl_encoder.async_infer(results)
-            results = await self.vl_encoder.wrap_for_turbomind(results, self.chat_template, self.tokenizer,
-                                                               sequence_start)
+            results = await self.vl_encoder.wrap_for_turbomind(results, self.chat_template, self.tokenizer)
         elif self.backend == 'pytorch':
             # for pt engine, this module only conduct the image preprocessing
             # It leaves the vision embedding to the pt engine
-            results = await self.vl_encoder.wrap_for_pytorch(results, self.chat_template, self.tokenizer,
-                                                             sequence_start)
+            results = await self.vl_encoder.wrap_for_pytorch(results, self.chat_template, self.tokenizer)
         return results
 
     @classmethod

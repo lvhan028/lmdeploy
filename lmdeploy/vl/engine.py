@@ -61,47 +61,56 @@ class ImageEncoder:
         outputs = await future
         return outputs
 
-    async def wrap_for_pytorch(self, messages: List[Dict], chat_template, tokenizer, sequence_start) -> List[Dict]:
-        """
+    async def wrap_for_pytorch(self, messages: List[Dict], chat_template, tokenizer) -> List[Dict]:
+        """Convert multimodal message data into a format suitable for the
+        PyTorch engine.
+
         Args:
-            messages (List[Dict]): a list of message, which is supposed to be
-                the output of `preprocess`
+            messages (List[Dict]): A list of messages, expected to be the output of the `preprocess` method.
+            chat_template: The chat template used to format the prompt information.
+            tokenizer: The tokenizer used to convert text into input IDs.
+
         Returns:
-            a dict which will be passed to pytorch engine_instance's forward.
-            The dict is like the following:
+            A dictionary that will be passed to the forward propagation method of the PyTorch engine instance.
+            The dictionary structure is as follows:
             Dict(
-                'prompt': 'the prompt after applying chat template'
+                'prompt': 'The prompt after applying the chat template',
                 'input_ids': [],
                 'multimodal': {
                     'pixel_values': torch.Tensor,
                     ...
-                ]
+                }
             )
         """
-        result = self.model.to_pytorch(messages, chat_template, tokenizer, sequence_start)
-        # clear data
+        result = self.model.to_pytorch(messages, chat_template, tokenizer)
+        # clear temp data
         for i, message in enumerate(messages):
             if isinstance(message['content'], List):
                 messages[i]['preprocess'] = None
         return result
 
-    async def wrap_for_turbomind(self, messages: List[Dict], chat_template, tokenizer, sequence_start) -> Dict:
-        """
+    async def wrap_for_turbomind(self, messages: List[Dict], chat_template, tokenizer) -> Dict:
+        """This method is used to convert multimodal message data into a format
+        suitable for the Turbomind engine.
+
         Args:
-            messages (List[Dict]): a list of message, which is supposed to be
-                the output of `async_infer`
+            messages (List[Dict]): A list of messages, which is expected to be the output of the `async_infer` method.
+            chat_template: The chat template used to format the prompt information.
+            tokenizer: The tokenizer used to convert text into input IDs.
+
         Returns:
-            a dict which will be passed to pytorch engine_instance's forward.
-            The dict is like the following:
+            A dictionary that will be passed to the forward propagation method of the Turbomind engine instance.
+            The dictionary structure is as follows:
             Dict(
-                'prompt': 'the prompt after applying chat template'
+                'prompt': 'The prompt after applying the chat template',
                 'input_ids': [],
                 'input_embeddings': list[torch.Tensor],
                 'input_embedding_ranges': list[torch.Tensor],
                 ...
+            )
         """
-        result = self.model.to_turbomind(messages, chat_template, tokenizer, sequence_start)
-        # clear data
+        result = self.model.to_turbomind(messages, chat_template, tokenizer)
+        # clear temp data
         for i, message in enumerate(messages):
             if isinstance(message['content'], List):
                 messages[i]['preprocess'] = None

@@ -117,7 +117,7 @@ class VisonModel(ABC):
         if self.backend == 'turbomind':
             raise NotImplementedError()
 
-    def to_pytorch(self, messages, chat_template, tokenizer, sequence_start):
+    def to_pytorch(self, messages, chat_template, tokenizer):
         """pack the preprocessing results in a format compatible with what is
         required by pytorch engine. ONLY implement it when the backend is
         pytorch engine.
@@ -126,12 +126,11 @@ class VisonModel(ABC):
             messages(List[Dict]): the output of `preprocess`
             chat_template: the chat template defined in `lmdeploy/model.py`
             tokenzer: the tokenizer model
-            sequence_start: starting flag of a sequence
         """
         if self.backend == 'pytorch':
             raise NotImplementedError()
 
-    def to_turbomind(self, messages, chat_template, tokenizer, sequence_start):
+    def to_turbomind(self, messages, chat_template, tokenizer):
         """pack the forwarding results in a format compatible with what is
         required by turbomind engine. ONLY implement it when the backend is
         turbomind engine.
@@ -140,7 +139,6 @@ class VisonModel(ABC):
             messages(List[Dict]): the output of `preprocess`
             chat_template: the chat template defined in `lmdeploy/model.py`
             tokenzer: the tokenizer model
-            sequence_start: starting flag of a sequence
         """
         if self.backend == 'turbomind':
             raise NotImplementedError()
@@ -166,7 +164,7 @@ class VisonModel(ABC):
             }) for x in content if x['type'] == 'image'])
         return images
 
-    def to_pytorch_aux(self, messages, prompt, IMAGE_TOKEN, tokenizer, sequence_start):
+    def to_pytorch_aux(self, messages, prompt, IMAGE_TOKEN, tokenizer):
         """auxiliary function to pack the preprocessing results in a format
         compatible with what is required by pytorch engine.
 
@@ -176,7 +174,6 @@ class VisonModel(ABC):
             IMAGE_TOKEN(str): a placeholder where image tokens will be
                 inserted
             tokenzer: the tokenizer model
-            sequence_start: starting flag of a sequence
         """
         # collect all preprocessing result from messages
         preps = [x['content'] for x in messages if x['role'] == 'preprocess']
@@ -196,12 +193,12 @@ class VisonModel(ABC):
                 image_tokens = preps[i - 1]['image_tokens']
                 assert self.image_token_id == preps[i - 1]['image_token_id']
                 input_ids.extend([self.image_token_id] * image_tokens)
-            token_ids = tokenizer.encode(seg, add_bos=((i == 0) and sequence_start))
+            token_ids = tokenizer.encode(seg, add_bos=(i == 0))
             input_ids.extend(token_ids)
 
         return dict(prompt=prompt, input_ids=input_ids, multimodal=preps)
 
-    def to_turbomind_aux(self, messages, prompt, IMAGE_TOKEN, tokenizer, sequence_start):
+    def to_turbomind_aux(self, messages, prompt, IMAGE_TOKEN, tokenizer):
         """auxiliary function to pack the forwarding results in a format
         compatible with what is required by turbomind engine.
 
@@ -211,7 +208,6 @@ class VisonModel(ABC):
             IMAGE_TOKEN(str): a placeholder where image tokens will be
                 inserted
             tokenzer: the tokenizer model
-            sequence_start: starting flag of a sequence
         """
         # collect image features from messages
         features = [x['content'] for x in messages if x['role'] == 'forward']
@@ -232,7 +228,7 @@ class VisonModel(ABC):
                 begins.append(len(input_ids))
                 ends.append(begins[-1] + image_dim)
                 input_ids.extend([self.image_token_id] * image_dim)
-            seg_ids = tokenizer.encode(seg, add_bos=((i == 0) and sequence_start))
+            seg_ids = tokenizer.encode(seg, add_bos=(i == 0))
             input_ids.extend(seg_ids)
         ranges = np.stack([begins, ends], axis=1).tolist()
         return dict(prompt=prompt, input_ids=input_ids, input_embeddings=features, input_embedding_ranges=ranges)

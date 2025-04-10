@@ -3,7 +3,7 @@ import json
 import os.path as osp
 from collections import deque
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from lmdeploy.utils import get_logger
 
@@ -339,34 +339,24 @@ class HuggingFaceTokenizer:
         add_special_tokens = False
         return self.model(s, add_special_tokens=add_special_tokens)
 
-
-class ChatGLM4Tokenizer(HuggingFaceTokenizer):
-    """tokenizer of GLM4."""
-
-    def __init__(self, model_path):
-        super(ChatGLM4Tokenizer, self).__init__(model_path)
-        original_pad = self.model._pad
-
-        def __pad(*args, **kwargs):
-            if 'padding_side' in kwargs:
-                kwargs.pop('padding_side')
-            return original_pad(*args, **kwargs)
-
-        # fix for transformers>4.45.0
-        self.model._pad = __pad
-
-    def encode(self, s: str, add_bos: bool = True, add_special_tokens: bool = True, **kwargs):
-        """tokenize a prompt."""
-        # ChtGLM4Tokenizer hardcode `add_speical_tokens=False` when tokenizing
-        # a prompt. Refer to https://huggingface.co/THUDM/glm-4-9b-chat/blob/main/tokenization_chatglm.py#L227 # noqa E501
-        return super(ChatGLM4Tokenizer, self).encode(s, add_bos, add_special_tokens=False, **kwargs)
+    def apply_chat_template(self,
+                            conversation: Union[List[Dict[str, str]], List[List[Dict[str, str]]]],
+                            tools: Optional[List[Union[Dict, Callable]]] = None,
+                            jinja_chat_template: str = None,
+                            tokenize: bool = True,
+                            **kwargs):
+        return self.model.apply_chat_template(conversation=conversation,
+                                              tools=tools,
+                                              chat_template=jinja_chat_template,
+                                              tokenize=tokenize,
+                                              **kwargs)
 
 
 class ChatGLMTokenizer(HuggingFaceTokenizer):
     """tokenizer of GLM2."""
 
     def __init__(self, model_path):
-        super(ChatGLMTokenizer, self).__init__(model_path)
+        super().__init__(model_path)
         original_pad = self.model._pad
 
         def __pad(*args, **kwargs):
@@ -376,6 +366,19 @@ class ChatGLMTokenizer(HuggingFaceTokenizer):
 
         # fix for transformers>4.45.0
         self.model._pad = __pad
+
+
+class ChatGLM4Tokenizer(ChatGLMTokenizer):
+    """tokenizer of GLM4."""
+
+    def __init__(self, model_path):
+        super().__init__(model_path)
+
+    def encode(self, s: str, add_bos: bool = True, add_special_tokens: bool = True, **kwargs):
+        """tokenize a prompt."""
+        # ChtGLM4Tokenizer hardcode `add_speical_tokens=False` when tokenizing
+        # a prompt. Refer to https://huggingface.co/THUDM/glm-4-9b-chat/blob/main/tokenization_chatglm.py#L227 # noqa E501
+        return super().encode(s, add_bos, add_special_tokens=False, **kwargs)
 
 
 class Tokenizer:
@@ -500,3 +503,16 @@ class Tokenizer:
                                 'than 1. Currently, it can not be used as stop words')
             return []
         return self.model.indexes_containing_token(token)
+
+    def apply_chat_template(self,
+                            conversation: Union[List[Dict[str, str]], List[List[Dict[str, str]]]],
+                            tools: Optional[List[Union[Dict, Callable]]] = None,
+                            jinja_chat_template: str = None,
+                            tokenize: bool = True,
+                            **kwargs):
+        """Apply a chat template to a conversation."""
+        return self.model.apply_chat_template(conversation=conversation,
+                                              tools=tools,
+                                              jinja_chat_template=jinja_chat_template,
+                                              tokenize=tokenize,
+                                              **kwargs)

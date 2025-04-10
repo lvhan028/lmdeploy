@@ -1441,11 +1441,11 @@ class HfChatTemplate:
     def __init__(self, tokenizer):
         self.tokenizer = tokenizer
 
-    def messages2prompt(self,
-                        messages: Union[List[Dict[str, str]], List[List[Dict[str, str]]]],
-                        tools: Optional[List[Union[Dict, Callable]]] = None,
-                        jinja_chat_template: str = None,
-                        **kwargs):
+    def apply_chat_template(self,
+                            messages: Union[List[Dict[str, str]], List[List[Dict[str, str]]]],
+                            tools: Optional[List[Union[Dict, Callable]]] = None,
+                            jinja_chat_template: str = None,
+                            **kwargs):
         """"""
         return self.tokenizer.apply_chat_template(
             conversation=messages,
