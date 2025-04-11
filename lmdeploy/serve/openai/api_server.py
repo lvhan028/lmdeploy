@@ -395,8 +395,6 @@ async def chat_completions_v1(request: ChatCompletionRequest, raw_request: Reque
         gen_config=gen_config,
         tools=tools,
         stream_response=True,  # always use stream to enable batching
-        sequence_start=True,
-        sequence_end=True,
         do_preprocess=not isinstance(request.messages, str),  # text completion for string input
         adapter_name=adapter_name,
     )
@@ -642,8 +640,6 @@ async def completions_v1(request: CompletionRequest, raw_request: Request = None
             request.session_id + i,
             gen_config=gen_config,
             stream_response=True,  # always use stream to enable batching
-            sequence_start=True,
-            sequence_end=True,
             do_preprocess=False,
             adapter_name=adapter_name)
         generators.append(result_generator)
@@ -779,7 +775,7 @@ async def encode(request: EncodeRequest, raw_request: Request = None):
 
     def encode(prompt: str, do_preprocess: bool, add_bos: bool):
         if do_preprocess:
-            prompt = VariableInterface.async_engine.chat_template.get_prompt(prompt, sequence_start=add_bos)
+            prompt = VariableInterface.async_engine.chat_template.get_prompt(prompt)
         input_ids = VariableInterface.async_engine.tokenizer.encode(prompt, add_bos=add_bos)
         return input_ids
 

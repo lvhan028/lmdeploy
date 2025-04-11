@@ -41,9 +41,7 @@ async def chat_stream_local(instruction: str, state_chatbot: Sequence, cancel_bt
     async for outputs in InterFace.async_engine.generate(instruction,
                                                          session_id,
                                                          gen_config=gen_config,
-                                                         stream_response=True,
-                                                         sequence_start=(len(state_chatbot) == 1),
-                                                         sequence_end=False):
+                                                         stream_response=True):
         response = outputs.response
         if outputs.finish_reason == 'length' and \
                 outputs.generate_token_len == 0:
@@ -101,9 +99,7 @@ async def cancel_local_func(state_chatbot: Sequence, cancel_btn: gr.Button, rese
         async for out in InterFace.async_engine.generate(messages,
                                                          session_id,
                                                          gen_config=gen_config,
-                                                         stream_response=True,
-                                                         sequence_start=True,
-                                                         sequence_end=False):
+                                                         stream_response=True):
             pass
         yield (state_chatbot, disable_btn, enable_btn)
 

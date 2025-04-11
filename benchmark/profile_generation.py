@@ -48,8 +48,6 @@ async def infer(model, session_id: int, input_ids: List, gen_config: GenerationC
         async for outputs in chatbot.async_stream_infer(session_id,
                                                         input_ids,
                                                         gen_config=gen_config,
-                                                        sequence_start=True,
-                                                        sequence_end=True,
                                                         stream_output=True):
             n_token = outputs.num_token
             now = time.perf_counter()
@@ -82,8 +80,6 @@ def warmup(model, concurrency: int, input_ids: List[int], warmup_round: int, gen
         for _ in range(warmup_round):
             async for _ in chatbot.async_stream_infer(session_id,
                                                       input_ids=input_ids,
-                                                      sequence_start=True,
-                                                      sequence_end=True,
                                                       ignore_eos=True,
                                                       gen_config=gen_config):
                 continue

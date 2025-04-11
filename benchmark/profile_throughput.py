@@ -102,8 +102,6 @@ class Engine:
                                                                                   top_p=top_p,
                                                                                   top_k=top_k,
                                                                                   ignore_eos=True),
-                                                      sequence_start=True,
-                                                      sequence_end=True,
                                                       stream_output=stream_output)
             try:
                 async for outputs in generator:
