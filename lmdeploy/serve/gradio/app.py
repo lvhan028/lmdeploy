@@ -6,7 +6,7 @@ from lmdeploy.messages import PytorchEngineConfig, TurbomindEngineConfig
 from lmdeploy.model import ChatTemplateConfig
 
 
-def run(model_path_or_server: str,
+def run(model_path: str,
         server_name: str = '0.0.0.0',
         server_port: int = 6006,
         batch_size: int = 32,
@@ -20,10 +20,7 @@ def run(model_path_or_server: str,
     """chat with AI assistant through web ui.
 
     Args:
-        model_path_or_server (str): the path of the deployed model or
-        restful api URL. For example:
-            - huggingface hub repo_id
-            - http://0.0.0.0:23333
+        model_path (str): the path of the deployed model
         server_name (str): the ip address of gradio server
         server_port (int): the port of gradio server
         batch_size (int): batch size for running Turbomind directly
@@ -37,28 +34,25 @@ def run(model_path_or_server: str,
         max_log_len (int): Max number of prompt characters or prompt tokens
             being printed in log. Default: Unlimited
     """
-    if '://' in model_path_or_server:
-        from lmdeploy.serve.gradio.api_server_backend import run_api_server
-        run_api_server(model_path_or_server, server_name, server_port, batch_size, share=share)
+  
+    pipeline_type, _ = get_task(model_path)
+    if pipeline_type == 'vlm':
+        from lmdeploy.serve.gradio.vl import run_local
+        if backend_config is not None and \
+                backend_config.session_len is None:
+            backend_config.session_len = 8192
     else:
-        pipeline_type, _ = get_task(model_path_or_server)
-        if pipeline_type == 'vlm':
-            from lmdeploy.serve.gradio.vl import run_local
-            if backend_config is not None and \
-                    backend_config.session_len is None:
-                backend_config.session_len = 8192
-        else:
-            from lmdeploy.serve.gradio.turbomind_coupled import run_local
-        run_local(model_path_or_server,
-                  server_name=server_name,
-                  server_port=server_port,
-                  backend=backend,
-                  backend_config=backend_config,
-                  chat_template_config=chat_template_config,
-                  model_name=model_name,
-                  batch_size=batch_size,
-                  share=share,
-                  **kwargs)
+        from lmdeploy.serve.gradio.turbomind_coupled import run_local
+    run_local(model_path,
+                server_name=server_name,
+                server_port=server_port,
+                backend=backend,
+                backend_config=backend_config,
+                chat_template_config=chat_template_config,
+                model_name=model_name,
+                batch_size=batch_size,
+                share=share,
+                **kwargs)
 
 
 if __name__ == '__main__':
