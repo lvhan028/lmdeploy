@@ -34,7 +34,7 @@ def run(model_path: str,
         max_log_len (int): Max number of prompt characters or prompt tokens
             being printed in log. Default: Unlimited
     """
-  
+
     pipeline_type, _ = get_task(model_path)
     if pipeline_type == 'vlm':
         from lmdeploy.serve.gradio.vl import run_local
@@ -44,15 +44,15 @@ def run(model_path: str,
     else:
         from lmdeploy.serve.gradio.turbomind_coupled import run_local
     run_local(model_path,
-                server_name=server_name,
-                server_port=server_port,
-                backend=backend,
-                backend_config=backend_config,
-                chat_template_config=chat_template_config,
-                model_name=model_name,
-                batch_size=batch_size,
-                share=share,
-                **kwargs)
+              server_name=server_name,
+              server_port=server_port,
+              backend=backend,
+              backend_config=backend_config,
+              chat_template_config=chat_template_config,
+              model_name=model_name,
+              batch_size=batch_size,
+              share=share,
+              **kwargs)
 
 
 if __name__ == '__main__':

@@ -3,11 +3,15 @@ import dataclasses
 import json
 import uuid
 from abc import abstractmethod
-from typing import Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from mmengine import Registry
+from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast, ProcessorMixin
+from typing_extensions import TypeVar
 
 from lmdeploy.utils import get_logger
+
+_P = TypeVar('_P', bound=ProcessorMixin, default=ProcessorMixin)
 
 logger = get_logger('lmdeploy')
 MODELS = Registry('model', locations=['lmdeploy.model'])
@@ -104,7 +108,6 @@ class ChatTemplateConfig:
         return cls(**json_data)
 
 
-@MODELS.register_module(name='llama')
 @MODELS.register_module(name='base')
 class BaseModel:
     """Base model."""
@@ -198,78 +201,6 @@ class BaseChatTemplate(BaseModel):
                                     continue_final_message=continue_final_message,
                                     tokenize=tokenize,
                                     **kwargs)
-
-
-@MODELS.register_module(name='cogvlm')
-class CogVLM(BaseChatTemplate):
-    """Chat template of CogVLM model."""
-
-    def __init__(self,
-                 meta_instruction='',
-                 eosys='',
-                 user='Question: ',
-                 separator='\n',
-                 eoh=' ',
-                 assistant='Answer:',
-                 eoa='</s>',
-                 stop_words=['</s>'],
-                 **kwargs):
-        super().__init__(meta_instruction=meta_instruction,
-                         eosys=eosys,
-                         user=user,
-                         eoh=eoh,
-                         separator=separator,
-                         assistant=assistant,
-                         eoa=eoa,
-                         stop_words=stop_words,
-                         **kwargs)
-
-
-@MODELS.register_module(name='cogvlm2')
-class CogVLM2(CogVLM):
-    """Chat template of CogVLM2 model."""
-
-    def __init__(self, eoa='<|end_of_text|>', stop_words=['<|end_of_text|>'], **kwargs):
-        super().__init__(eoa=eoa, stop_words=stop_words, **kwargs)
-
-
-@MODELS.register_module(name='wizardlm')
-@MODELS.register_module(name='vicuna')
-class Vicuna(BaseChatTemplate):
-    """Chat template of vicuna model."""
-
-    def __init__(
-            self,
-            meta_instruction="""A chat between a curious user and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the user's questions.""",  # noqa: E501
-            eosys=' ',
-            user='USER: ',
-            eoh=' ',
-            assistant='ASSISTANT: ',
-            eoa='</s>',
-            stop_words=['</s>'],
-            **kwargs):
-        super().__init__(meta_instruction=meta_instruction,
-                         eosys=eosys,
-                         user=user,
-                         eoh=eoh,
-                         assistant=assistant,
-                         eoa=eoa,
-                         stop_words=stop_words,
-                         **kwargs)
-
-    def messages2prompt(self, messages, **kwargs):
-        return super().messages2prompt(messages, **kwargs)[:-1]
-
-
-@MODELS.register_module(name='llava-v1')
-class Llavav1(Vicuna):
-    """Chat template of llava-v1 model."""
-
-    def __init__(
-            self,
-            meta_instruction="""A chat between a curious human and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the human's questions.""",  # noqa: E501
-            **kwargs):
-        super().__init__(meta_instruction=meta_instruction, **kwargs)
 
 
 @MODELS.register_module(name='internlm')
@@ -459,144 +390,6 @@ class InternLMXComposer2Chat7B(InternLMChat7B):
                          **kwargs)
 
 
-@MODELS.register_module(name='baichuan2')
-class Baichuan2(BaseChatTemplate):
-    """Chat template and generation parameters of Baichuan2-7B-Base and
-    Baichuan2-7B-Chat models."""
-
-    def __init__(self, user='<reserved_106>', assistant='<reserved_107>', **kwargs):
-        super().__init__(user=user, assistant=assistant, **kwargs)
-
-
-@MODELS.register_module(name='llama2')
-class Llama2(BaseChatTemplate):
-    """Chat template of LLaMA2 model."""
-
-    def __init__(
-            self,
-            system='[INST] <<SYS>>\n',
-            meta_instruction="""\
-You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe. Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.
-
-If a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information.""",  # noqa: E501
-            eosys='\n<</SYS>>\n\n',
-            assistant=' [/INST] ',
-            eoa='</s>',
-            separator='<s>[INST] ',
-            session_len=4096,
-            **kwargs):
-        super().__init__(system=system,
-                         meta_instruction=meta_instruction,
-                         eosys=eosys,
-                         assistant=assistant,
-                         eoa=eoa,
-                         separator=separator,
-                         session_len=session_len,
-                         **kwargs)
-
-
-@MODELS.register_module(name='minicpmv-2d6')
-@MODELS.register_module(name='minicpm3')
-@MODELS.register_module(name='qwen')
-class Qwen7BChat(BaseChatTemplate):
-    """Chat template for Qwen-7B-Chat."""
-
-    def __init__(self,
-                 system='<|im_start|>system\n',
-                 meta_instruction='You are a helpful assistant.',
-                 eosys='<|im_end|>\n',
-                 user='<|im_start|>user\n',
-                 eoh='<|im_end|>\n',
-                 assistant='<|im_start|>assistant\n',
-                 eoa='<|im_end|>',
-                 separator='\n',
-                 stop_words=['<|im_end|>'],
-                 **kwargs):
-        super().__init__(system=system,
-                         meta_instruction=meta_instruction,
-                         eosys=eosys,
-                         user=user,
-                         eoh=eoh,
-                         assistant=assistant,
-                         eoa=eoa,
-                         separator=separator,
-                         stop_words=stop_words,
-                         **kwargs)
-
-
-@MODELS.register_module(name='chatglm')
-class ChatGLM2(BaseModel):
-
-    def __init__(self, user='问：', eoh='\n\n', assistant='答：', eoa='\n\n', **kwargs):
-        super().__init__(**kwargs)
-        self._user = user
-        self._assistant = assistant
-        self._eoh = eoh
-        self._eoa = eoa
-        self.count = 0
-
-    def messages2prompt(self, messages, **kwargs):
-        """message to prompt."""
-        ret = ''
-        count = 0
-        for message in messages:
-            role = message['role']
-            content = get_text(message['content'])
-            if role == 'user':
-                count += 1
-                ret += f'[Round {count}]\n\n'
-                ret += f'{self._user}{content}{self._eoh}'
-                ret += f'{self._assistant}'
-            if role == 'assistant':
-                ret += f'{content}'
-        return ret
-
-
-@MODELS.register_module(name=['mistral', 'mixtral'])
-class MistralChat(BaseChatTemplate):
-    """Template of Mistral and Mixtral Instruct models.
-
-    `https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.1`
-    `https://huggingface.co/mistralai/Mixtral-8x7B-Instruct-v0.1`
-    """
-
-    def __init__(self, user='[INST] ', eoh=' [/INST]', eoa='</s>', **kwargs):
-        super().__init__(user=user, eoh=eoh, eoa=eoa, **kwargs)
-
-
-@MODELS.register_module(name=['gemma'])
-class Gemma(BaseChatTemplate):
-    """Template of Gemma models.
-
-    `https://huggingface.co/google/gemma-7b-it`
-    """
-
-    def __init__(self,
-                 user='<start_of_turn>user\n',
-                 eoh='<end_of_turn>\n',
-                 assistant='<start_of_turn>model\n',
-                 eoa='<end_of_turn>\n',
-                 stop_words=['<end_of_turn>'],
-                 **kwargs):
-        super().__init__(user=user, eoh=eoh, assistant=assistant, eoa=eoa, stop_words=stop_words, **kwargs)
-
-
-@MODELS.register_module(name=['deepseek'])
-class Deepseek(BaseChatTemplate):
-
-    def __init__(self,
-                 eosys='\n\n',
-                 user='User: ',
-                 eoh='\n\n',
-                 assistant='Assistant: ',
-                 eoa='<｜end▁of▁sentence｜>',
-                 **kwargs):
-        super().__init__(eosys=eosys, user=user, eoh=eoh, assistant=assistant, eoa=eoa, **kwargs)
-
-    def messages2prompt(self, messages, sequence_start=True, **kwargs):
-        return super().messages2prompt(messages, sequence_start, **kwargs)[:-1]
-
-
 @MODELS.register_module(name=['internvl-zh'])
 class InternVLZH(BaseChatTemplate):
 
@@ -607,86 +400,7 @@ class InternVLZH(BaseChatTemplate):
         return super().messages2prompt(messages, sequence_start, **kwargs)[:-1]
 
 
-@MODELS.register_module(name=['deepseek-vl'])
-class DeepseekVL(BaseChatTemplate):
-
-    def __init__(
-            self,
-            meta_instruction="""You are a helpful language and vision assistant. You are able to understand the visual content that the user provides, and assist the user with a variety of tasks using natural language.""",  # noqa: E501
-            eosys='\n\n',
-            user='User: ',
-            eoh='\n\n',
-            assistant='Assistant: ',
-            eoa='<｜end▁of▁sentence｜>',
-            **kwargs):
-        super().__init__(meta_instruction=meta_instruction,
-                         eosys=eosys,
-                         user=user,
-                         eoh=eoh,
-                         assistant=assistant,
-                         eoa=eoa,
-                         **kwargs)
-
-    def messages2prompt(self, messages, sequence_start=True, **kwargs):
-        return super().messages2prompt(messages, sequence_start, **kwargs)[:-1]
-
-    @classmethod
-    def match(cls, model_path: str) -> Optional[str]:
-        """Return the model_name that was registered to MODELS.
-
-        Args:
-            model_path (str): the model path used for matching.
-        """
-        path = model_path.lower()
-        if 'deepseek-vl' in path and 'chat' in path:
-            return 'deepseek-vl'
-
-
-@MODELS.register_module(name=['deepseek-vl2'])
-class DeepseekVL2(BaseChatTemplate):
-
-    def __init__(self,
-                 meta_instruction='',
-                 eosys='',
-                 user='<|User|>: ',
-                 eoh='\n\n',
-                 assistant='<|Assistant|>: ',
-                 eoa='<｜end▁of▁sentence｜>',
-                 **kwargs):
-        super().__init__(meta_instruction=meta_instruction,
-                         eosys=eosys,
-                         user=user,
-                         eoh=eoh,
-                         assistant=assistant,
-                         eoa=eoa,
-                         **kwargs)
-
-    def messages2prompt(self, messages, sequence_start=True, **kwargs):
-        return super().messages2prompt(messages, sequence_start, **kwargs)[:-1]
-
-
-@MODELS.register_module(name=['yi-vl'])
-class YiVL(BaseChatTemplate):
-
-    def __init__(
-            self,
-            meta_instruction="""This is a chat between an inquisitive human and an AI assistant. Assume the role of the AI assistant. Read all the images carefully, and respond to the human's questions with informative, helpful, detailed and polite answers. 这是一个好奇的人类和一个人工智能助手之间的对话。假设你扮演这个AI助手的角色。仔细阅读所有的图像，并对人类的问题做出信息丰富、有帮助、详细的和礼貌的回答。\n\n""",  # noqa: E501
-            user='### Human: ',
-            eoh='\n',
-            assistant='### Assistant:',
-            eoa='\n',
-            stop_words=['###'],
-            **kwargs):
-        super().__init__(meta_instruction=meta_instruction,
-                         user=user,
-                         eoh=eoh,
-                         assistant=assistant,
-                         eoa=eoa,
-                         stop_words=stop_words,
-                         **kwargs)
-
-
-@MODELS.register_module(name=['llava-chatml', 'internvl-zh-hermes2'])
+@MODELS.register_module(name=['internvl-zh-hermes2'])
 class ChatmlDirect(BaseChatTemplate):
 
     def __init__(self,
@@ -757,108 +471,6 @@ class InternVL2Phi3(Phi3Instruct):
         super().__init__(meta_instruction=meta_instruction, **kwargs)
 
 
-@MODELS.register_module(name='chatglm3')
-class ChatGLM3(BaseChatTemplate):
-    """Chat template of chatglm3 model."""
-
-    def __init__(self,
-                 system='<|system|>\n ',
-                 meta_instruction=None,
-                 eosys='',
-                 user='<|user|>\n ',
-                 eoh='',
-                 assistant='<|assistant|>\n ',
-                 eoa='',
-                 separator='',
-                 stop_words=['<eos>'],
-                 **kwargs):
-        super().__init__(system=system,
-                         meta_instruction=meta_instruction,
-                         eosys=eosys,
-                         user=user,
-                         eoh=eoh,
-                         assistant=assistant,
-                         eoa=eoa,
-                         separator=separator,
-                         stop_words=stop_words,
-                         **kwargs)
-        self.start = '[gMASK]sop'
-
-    def messages2prompt(self, messages, **kwargs):
-        """Return the prompt that is concatenated with other elements in the
-        chat template.
-
-        Args:
-            messages (str | List): user's input prompt
-        Returns:
-            str: the concatenated prompt
-        """
-        return self.start + super().messages2prompt(messages, **kwargs)
-
-    @classmethod
-    def match(cls, model_path: str) -> Optional[str]:
-        """Return the model_name that was registered to MODELS.
-
-        Args:
-            model_path (str): the model path used for matching.
-        """
-        path = model_path.lower()
-        if 'chatglm3' in path:
-            return 'chatglm3'
-
-
-@MODELS.register_module(name='glm4')
-class Glm4Chat(ChatGLM3):
-    """Chat template of glm-4 model."""
-
-    def __init__(self,
-                 system='<|system|>\n',
-                 user='<|user|>\n',
-                 assistant='<|assistant|>\n',
-                 stop_words=['<|user|>', '<|endoftext|>', '<|observation|>'],
-                 **kwargs):
-        super().__init__(system=system, user=user, assistant=assistant, stop_words=stop_words, **kwargs)
-        self.start = '[gMASK]<sop>'
-
-    @classmethod
-    def match(cls, model_path: str) -> Optional[str]:
-        """Return the model_name that was registered to MODELS.
-
-        Args:
-            model_path (str): the model path used for matching.
-        """
-        path = model_path.lower()
-        if 'glm-4' in path:
-            return 'glm4'
-
-
-@MODELS.register_module(name='codegeex4')
-class CodeGeeX4Chat(BaseChatTemplate):
-    """Chat template of THUDM/codegeex4-all-9b model."""
-
-    def __init__(self,
-                 system='<|system|>\n',
-                 meta_instruction='你是一位智能编程助手，你叫CodeGeeX。你会为用户回答关于编程、代码、计算机方面的任何问题，并提供格式规范、可以执行、准确安全的代码，并在必要时提供详细的解释。',
-                 eosys='',
-                 user='<|user|>\n',
-                 eoh='',
-                 assistant='<|assistant|>\n',
-                 eoa='',
-                 separator='',
-                 stop_words=['<|endoftext|>', '<|user|>', '<|observation|>'],
-                 **kwargs):
-        super().__init__(system=system,
-                         meta_instruction=meta_instruction,
-                         eosys=eosys,
-                         user=user,
-                         eoh=eoh,
-                         assistant=assistant,
-                         eoa=eoa,
-                         separator=separator,
-                         stop_words=stop_words,
-                         **kwargs)
-
-
 @MODELS.register_module(name='internvl-phi3')
 class InternVLPhi3(Phi3Instruct):
     """Chat template of InternVL Chat 4B model."""
@@ -878,43 +490,100 @@ class InternVLPhi3(Phi3Instruct):
                          **kwargs)
 
 
-@MODELS.register_module(name='molmo')
-class Molmo(BaseChatTemplate):
-
-    def __init__(self,
-                 user=' User: ',
-                 eoh='',
-                 assistant=' Assistant:',
-                 eoa='',
-                 separator=' ',
-                 stop_words=['<|endoftext|>'],
-                 **kwargs):
-        super().__init__(user=user,
-                         eoh=eoh,
-                         assistant=assistant,
-                         eoa=eoa,
-                         separator=separator,
-                         stop_words=stop_words,
-                         **kwargs)
-
-
 class HfChatTemplate:
 
-    def __init__(self, tokenizer):
+    def __init__(self, tokenizer, jinja_chat_template: str = None):
         self.tokenizer = tokenizer
+        self.chat_template = jinja_chat_template
 
     def apply_chat_template(self,
                             messages: Union[List[Dict[str, str]], List[List[Dict[str, str]]]],
                             tools: Optional[List[Union[Dict, Callable]]] = None,
-                            jinja_chat_template: str = None,
                             add_generation_prompt: bool = True,
                             **kwargs):
         """"""
         return self.tokenizer.apply_chat_template(
             conversation=messages,
             tools=tools,
-            chat_template=jinja_chat_template,
+            chat_template=self.chat_template,
             tokenize=False,
             add_generation_prompt=add_generation_prompt,
             **kwargs,
         )
+
+
+def get_processor(
+    processor_name: str,
+    *args: Any,
+    trust_remote_code: bool = True,
+    processor_cls: Union[type[_P], tuple[type[_P], ...]] = ProcessorMixin,
+    **kwargs: Any,
+) -> _P:
+    """Load a processor for the given model name via HuggingFace."""
+    # don't put this import at the top level
+    # it will call torch.cuda.device_count()
+    from transformers import AutoProcessor
+
+    processor_factory = (AutoProcessor
+                         if processor_cls == ProcessorMixin or isinstance(processor_cls, tuple) else processor_cls)
+
+    try:
+        processor = processor_factory.from_pretrained(
+            processor_name,
+            *args,
+            trust_remote_code=trust_remote_code,
+            **kwargs,
+        )
+    except ValueError as e:
+        # If the error pertains to the processor class not existing or not
+        # currently being imported, suggest using the --trust-remote-code flag.
+        # Unlike AutoTokenizer, AutoProcessor does not separate such errors
+        if not trust_remote_code:
+            err_msg = ('Failed to load the processor. If the processor is '
+                       'a custom processor not yet available in the HuggingFace '
+                       'transformers library, consider setting '
+                       '`trust_remote_code=True` in LLM or using the '
+                       '`--trust-remote-code` flag in the CLI.')
+            raise RuntimeError(err_msg) from e
+        else:
+            raise e
+
+    if not isinstance(processor, processor_cls):
+        raise TypeError('Invalid type of HuggingFace processor. '
+                        f'Expected type: {processor_cls}, but '
+                        f'found type: {type(processor)}')
+
+    return processor
+
+
+def resolve_hf_chat_template(tokenizer: Union[PreTrainedTokenizer, PreTrainedTokenizerFast],
+                             chat_template_config: ChatTemplateConfig = None,
+                             tools: Optional[list[dict[str, Any]]] = None) -> BaseChatTemplate:
+    """modify from vllm."""
+
+    # 1st priority: The given chat template
+    if chat_template_config is not None and chat_template_config.model_name:
+        return chat_template_config.chat_template
+
+    # 2nd priority: AutoProcessor chat template, unless tool calling is enabled
+    if tools is None:
+        try:
+            processor = get_processor(
+                tokenizer.name_or_path,
+                processor_cls=(PreTrainedTokenizer, PreTrainedTokenizerFast, ProcessorMixin),
+                trust_remote_code=True,
+            )
+            if isinstance(processor, ProcessorMixin) and \
+                processor.chat_template is not None:
+                return HfChatTemplate(tokenizer, processor.chat_template)
+        except Exception:
+            logger.debug('Failed to load AutoProcessor chat template for %s', tokenizer.name_or_path, exc_info=True)
+
+    # 3rd priority: AutoTokenizer chat template
+    try:
+        chat_template = tokenizer.get_chat_template(tools=tools)
+        return HfChatTemplate(tokenizer, chat_template)
+    except Exception:
+        logger.debug('Failed to load AutoTokenizer chat template for %s', tokenizer.name_or_path, exc_info=True)
+
+    return None
