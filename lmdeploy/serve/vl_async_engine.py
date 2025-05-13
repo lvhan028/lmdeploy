@@ -6,6 +6,7 @@ from typing import Dict, List, Literal, Optional, Tuple, Union
 import PIL
 
 from lmdeploy.messages import PytorchEngineConfig, TurbomindEngineConfig, VisionConfig
+from lmdeploy.model import BaseChatTemplate
 from lmdeploy.serve.async_engine import AsyncEngine
 from lmdeploy.utils import get_logger, try_import_deeplink
 from lmdeploy.vl.engine import ImageEncoder
@@ -68,6 +69,7 @@ class VLAsyncEngine(AsyncEngine):
         else:
             raise RuntimeError(f'unsupported messages {messages}')
 
+        chat_template = self.chat_template if do_preprocess else BaseChatTemplate()
         messages = await self.async_convert_to_pil_images(messages)
         results = await self.vl_encoder.preprocess(messages)
         if self.backend == 'turbomind':

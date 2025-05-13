@@ -176,7 +176,7 @@ class BaseChatTemplate(BaseModel):
             role = message['role']
             content = get_text(message['content'])
             ret += f'{box_map[role]}{content}{eox_map[role]}'
-        if len(messages) and messages[-1]['role'] == 'assistant':
+        if len(messages) and messages[-1]['role'] == 'assistant' and len(eox_map['assistant']) > 0:
             return ret[:-len(eox_map['assistant'])]  # prefix of response
         ret += f'{self.assistant}'
         return ret
@@ -437,6 +437,7 @@ class ChatmlDirect(BaseChatTemplate):
             return 'internvl-zh-hermes2'
 
 
+@MODELS.register_module(name='phi-4')
 @MODELS.register_module(name='phi-3')
 class Phi3Instruct(BaseChatTemplate):
     """Chat template of InternLM model."""
