@@ -407,6 +407,99 @@ def download_and_cache_file(url: str, filename: Optional[str] = None):
     return filename
 
 
+def sample_qipeng_requests(dataset_path: str, num_requests: int, tokenizer: PreTrainedTokenizerBase):
+    filtered_dataset = []
+    system_prompt = 'You are an expert reasoner with extensive experience in all areas. You approach problems through systematic thinking and rigorous reasoning. Your response should reflect deep understanding and precise logical thinking, making your solution path and reasoning clear to others. Please put your thinking process within <think>...</think> tags.'  # noqa
+    with open(dataset_path) as f:
+        lines = f.readlines()
+        for line in lines:
+            data = json.loads(line)
+            messages = data['prompt']
+            for message in messages:
+                message['role'] = 'user'
+                message['content'] = message['prompt']
+                message.pop('prompt')
+            messages.insert(0, dict(role='system', content=system_prompt))
+            prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            prompt_ids = tokenizer.apply_chat_template(messages,
+                                                       tokenize=True,
+                                                       add_generation_prompt=True,
+                                                       return_tensors='pt')
+            input_len = prompt_ids.shape[-1]
+            filtered_dataset.append((prompt, input_len, 32768))
+        print(f'#Input tokens: {np.sum([x[1] for x in filtered_dataset])}')
+    filtered_dataset = filtered_dataset[:num_requests]
+    return filtered_dataset
+
+
+def sample_oc_requests(dataset_path: str, num_requests: int, tokenizer: PreTrainedTokenizerBase):
+    filtered_dataset = []
+    for root, dirs, files in os.walk(dataset_path):
+        for file in files:
+            if not file.endswith('.json'):
+                continue
+            file_path = os.path.join(root, file)
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    for k, v in data:
+                        origin_prompt = v['origin_prompt']
+                        for message in origin_prompt:
+                            message.update('content', message['prompt'])
+                            message.pop('prompt')
+                        prompt = tokenizer.apply_chat_template(origin_prompt,
+                                                               tokenizer=False,
+                                                               add_generation_prompt=True)
+                        prompt_ids = tokenizer.apply_chat_template(origin_prompt,
+                                                                   tokenize=True,
+                                                                   add_generation_prompt=True,
+                                                                   return_tensors='pt')
+                        input_len = prompt_ids.shape[-1]
+                        filtered_dataset.append((prompt, input_len, 32768))
+            except Exception as e:
+                print(f'exception happened, {e}')
+    filtered_dataset = filtered_dataset[:num_requests]
+    return filtered_dataset
+
+
+def sample_oreal_requests(
+    dataset_path: str,
+    num_requests: int,
+    tokenizer: PreTrainedTokenizerBase,
+    ignore_eos: bool,
+    fixed_output_len: Optional[int] = None,
+):
+    if fixed_output_len is not None and fixed_output_len < 4:
+        raise ValueError('output_len too small')
+
+    if fixed_output_len is None:
+        assert ignore_eos is False, 'fixed_output_len is not specified, --disable-ignore-eos MUST be specified'
+
+    with open(dataset_path, 'r') as f:
+        reader = csv.reader(f)
+        # The record in each line is (prompt, prompt_len, output_len)
+        datasets = [row for row in reader]
+
+        while len(datasets) < num_requests:
+            datasets.extend(datasets)
+
+        # Shuffle the dataset.
+        random.shuffle(datasets)
+        # filter the dataset
+        datasets = datasets[:num_requests]
+        filtered_dataset: List[Tuple[str, int, int]] = []
+        for i in range(len(datasets)):
+            prompt = datasets[i][0]
+            prompt_token_ids = tokenizer.encode(prompt)
+            prompt_len = len(prompt_token_ids)
+            output_len = fixed_output_len if fixed_output_len else 32768
+            filtered_dataset.append((prompt, prompt_len, output_len))
+        print(f'#Input tokens: {np.sum([x[1] for x in filtered_dataset])}')
+        if fixed_output_len:
+            print(f'#Output tokens: {np.sum([x[2] for x in filtered_dataset])}')
+        return filtered_dataset
+
+
 def sample_sharegpt_requests(
     dataset_path: str,
     num_requests: int,
@@ -905,6 +998,22 @@ def run_benchmark(args_: argparse.Namespace):
             tokenizer=tokenizer,
             dataset_path=args.dataset_path,
         )
+    elif args.dataset_name == 'oreal':
+        input_requests = sample_oreal_requests(
+            dataset_path=args.dataset_path,
+            num_requests=args.num_prompts,
+            tokenizer=tokenizer,
+            ignore_eos=not args.disable_ignore_eos,
+            fixed_output_len=args.sharegpt_output_len,
+        )
+    elif args.dataset_name == 'oc':
+        input_requests = sample_oc_requests(dataset_path=args.dataset_path,
+                                            num_requests=args.num_prompts,
+                                            tokenizer=tokenizer)
+    elif args.dataset_name == 'qipeng':
+        input_requests = sample_qipeng_requests(dataset_path=args.dataset_path,
+                                                num_requests=args.num_prompts,
+                                                tokenizer=tokenizer)
     else:
         raise ValueError(f'Unknown dataset: {args.dataset_name}')
 
@@ -976,7 +1085,7 @@ if __name__ == '__main__':
         '--dataset-name',
         type=str,
         default='sharegpt',
-        choices=['sharegpt', 'random'],
+        choices=['sharegpt', 'random', 'oreal', 'oc', 'qipeng'],
         help='Name of the dataset to benchmark on.',
     )
     parser.add_argument('--dataset-path', type=str, default='', help='Path to the dataset.')
