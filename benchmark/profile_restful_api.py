@@ -427,38 +427,40 @@ def sample_qipeng_requests(dataset_path: str, num_requests: int, tokenizer: PreT
                                                        return_tensors='pt')
             input_len = prompt_ids.shape[-1]
             filtered_dataset.append((prompt, input_len, 32768))
-        print(f'#Input tokens: {np.sum([x[1] for x in filtered_dataset])}')
     filtered_dataset = filtered_dataset[:num_requests]
+    print(f'#Input tokens: {np.sum([x[1] for x in filtered_dataset])}')
     return filtered_dataset
 
 
 def sample_oc_requests(dataset_path: str, num_requests: int, tokenizer: PreTrainedTokenizerBase):
     filtered_dataset = []
-    for root, dirs, files in os.walk(dataset_path):
-        for file in files:
-            if not file.endswith('.json'):
-                continue
-            file_path = os.path.join(root, file)
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    for k, v in data:
-                        origin_prompt = v['origin_prompt']
-                        for message in origin_prompt:
-                            message.update('content', message['prompt'])
-                            message.pop('prompt')
-                        prompt = tokenizer.apply_chat_template(origin_prompt,
-                                                               tokenizer=False,
-                                                               add_generation_prompt=True)
-                        prompt_ids = tokenizer.apply_chat_template(origin_prompt,
-                                                                   tokenize=True,
-                                                                   add_generation_prompt=True,
-                                                                   return_tensors='pt')
-                        input_len = prompt_ids.shape[-1]
-                        filtered_dataset.append((prompt, input_len, 32768))
-            except Exception as e:
-                print(f'exception happened, {e}')
+    json_files = [f for f in os.listdir(dataset_path) if f.endswith('.json')]
+    reference_output_len = []
+    pbar = tqdm(total=len(json_files))
+    for file in json_files:
+        file_path = os.path.join(dataset_path, file)
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            for k, v in data.items():
+                origin_prompt = v['origin_prompt']
+                predictions = v['prediction']
+                messages = []
+                for message in origin_prompt:
+                    if message['role'] == 'SYSTEM':
+                        messages.append(dict(role='system', content=message['prompt']))
+                    elif message['role'] == 'HUMAN':
+                        messages.append(dict(role='user', content=message['prompt']))
+                prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                input_len = len(tokenizer.encode(prompt))
+                output_len = len(tokenizer.encode(predictions))
+                reference_output_len.append(output_len)
+                filtered_dataset.append((prompt, input_len, 32768))
+                if len(filtered_dataset) > num_requests:
+                    break
+        pbar.update(1)
     filtered_dataset = filtered_dataset[:num_requests]
+    reference_output_len = reference_output_len[:num_requests]
+    print(f'#Input tokens: {np.sum([x[1] for x in filtered_dataset])}')
     return filtered_dataset
 
 
