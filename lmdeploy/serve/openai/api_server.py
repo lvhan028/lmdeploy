@@ -535,7 +535,7 @@ async def chat_completions_v1(raw_request: Request = None):
         if await raw_request.is_disconnected():
             # Abort the request if the client disconnects.
             await VariableInterface.async_engine.stop_session(request.session_id)
-            return create_error_response(HTTPStatus.BAD_REQUEST, 'Client disconnected')
+            raise HTTPException(status_code=499, detail="Connection closed by client")
         final_res = res
         text += res.response
         if res.token_ids:
@@ -781,8 +781,9 @@ async def completions_v1(raw_request: Request = None):
         async for res in generator:
             if await raw_request.is_disconnected():
                 # Abort the request if the client disconnects.
+                logger.warning(f'client disconnected ...')
                 await VariableInterface.async_engine.stop_session(request.session_id)
-                return create_error_response(HTTPStatus.BAD_REQUEST, 'Client disconnected')
+                raise HTTPException(status_code=499, detail="Connection closed by client")
             final_res = res
             text += res.response
             cache_block_ids.append(res.cache_block_ids)
@@ -1042,7 +1043,7 @@ async def chat_interactive_v1(request: GenerateRequest, raw_request: Request = N
             if await raw_request.is_disconnected():
                 # Abort the request if the client disconnects.
                 await async_engine.stop_session(request.session_id)
-                return create_error_response(HTTPStatus.BAD_REQUEST, 'Client disconnected')
+                raise HTTPException(status_code=499, detail="Connection closed by client")
             text += out.response
             tokens = out.generate_token_len
             input_tokens = out.input_token_len
