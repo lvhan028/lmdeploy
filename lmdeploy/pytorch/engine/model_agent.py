@@ -894,7 +894,6 @@ class BaseModelAgent:
 
             if self.dist_ctx.dp > 1:
                 # get device_id from weight
-                print(f'---------------{[(type(func_args), len(func_args), func_args )for k, (func_name, func_args) in weights]}')
                 device_ids = [func_args[6] for k, (func_name, func_args) in weights]
                 assert all([x == device_ids[0] for x in device_ids])
                 # device_id = device_ids[0]
@@ -928,29 +927,6 @@ class BaseModelAgent:
                 # the kv cache engine is built.
                 logger.info(f'Building CacheEngine with config: \n{self.cache_config}.')
                 self.build_cache_engine()
-
-    @torch.inference_mode()
-    def sleep(self, tags: Optional[List[str]] = None):
-        """Sleep."""
-        if tags is None:
-            tags = ['weights', 'kv_cache']
-        if 'weights' in tags:
-            # TODO: find better way to avoid reset graph
-            self.reset_graph_runner()
-            self.patched_model.get_model().cpu()
-        if 'kv_cache' in tags:
-            self.cache_engine = None
-        torch.cuda.empty_cache()
-
-    @torch.inference_mode()
-    def wakeup(self, tags: Optional[List[str]] = None):
-        """Wakeup."""
-        if tags is None:
-            tags = ['weights', 'kv_cache']
-        if 'weights' in tags:
-            self.patched_model.get_model().to(torch.cuda.current_device())
-        if 'kv_cache' in tags:
-            self.build_cache_engine()
 
     def release(self):
         """release."""
