@@ -127,6 +127,7 @@ class ChatCompletionRequest(BaseModel):
     user: Optional[str] = None
     response_format: Optional[ResponseFormat] = Field(default=None, examples=[None])  # noqa
     # additional argument of lmdeploy
+    do_preprocess: Optional[bool] = True
     repetition_penalty: Optional[float] = 1.0
     session_id: Optional[int] = -1
     ignore_eos: Optional[bool] = False
@@ -331,6 +332,33 @@ class EmbeddingsResponse(BaseModel):
     usage: UsageInfo
 
 
+class PoolingRequest(BaseModel):
+    """Pooling request.
+
+    Currently we follow vLLM API protocol,
+    https://github.com/vllm-project/vllm/blob/main/vllm/entrypoints/openai/protocol.py#L1174
+
+    Notice that ideally we should reuse the input format of embedding API
+    https://github.com/vllm-project/vllm/blob/main/vllm/entrypoints/openai/protocol.py#L1174
+    https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/entrypoints/http_server.py#L383
+    """
+    model: Optional[str] = None
+    input: Union[List[int], List[List[int]], str, List[str]]
+    encoding_format: Literal['float', 'base64'] = 'float'
+    dimensions: Optional[int] = None
+    user: Optional[str] = None
+
+
+class PoolingResponse(BaseModel):
+    """Pooling response."""
+    id: str = Field(default_factory=lambda: f'pool-{shortuuid.random()}')
+    object: str = 'list'
+    created: int = Field(default_factory=lambda: int(time.time()))
+    model: str = None
+    data: List[Dict[str, Any]]
+    usage: UsageInfo
+
+
 class EncodeRequest(BaseModel):
     """Encode request."""
     input: Union[str, List[str]]
@@ -380,3 +408,8 @@ class UpdateParamsRequest(BaseModel):
     """Update weights request."""
     serialized_named_tensors: Union[str, List[str], Dict]
     finished: bool = False
+
+
+class SleepWakeupRequest(BaseModel):
+    """Sleep or wakeup request."""
+    tags: Optional[List[str]] = None
