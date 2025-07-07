@@ -252,7 +252,7 @@ class RayWorkerWrapper(WorkerWrapperBase):
         dtype: str = 'auto',
         log_level: int = 30,
     ):
-        logger.warning(f'IN RayWorkerWrapper, CUDA_VISIBLE_DEVICES={os.getenv("CUDA_VISIBLE_DEVICES")}')
+        logger.info(f'IN RayWorkerWrapper, CUDA_VISIBLE_DEVICES={os.getenv("CUDA_VISIBLE_DEVICES")}')
         init_backend(device_type)
         try_import_deeplink(device_type)
 
