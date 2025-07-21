@@ -3,13 +3,14 @@ from lmdeploy.messages import PytorchEngineConfig
 
 from ..check_env.adapter import AdapterChecker
 from ..check_env.base import BaseChecker
+from ..check_env.dist import DistChecker
 from ..check_env.model import ModelChecker
 from ..check_env.torch import TorchChecker
 from ..check_env.transformers import TransformersChecker
 
 
 class EngineChecker(BaseChecker):
-    """check transformers is available."""
+    """Check transformers is available."""
 
     def __init__(self,
                  model_path: str,
@@ -29,9 +30,12 @@ class EngineChecker(BaseChecker):
 
         if device_type == 'cuda':
             # triton
+            from ..check_env.cuda import CudaChecker
             from ..check_env.triton import TritonChecker
+            cuda_checker = CudaChecker(model_format=engine_config.model_format, logger=logger)
+            cuda_checker.register_required_checker(torch_checker)
             triton_checker = TritonChecker(logger=logger)
-            triton_checker.register_required_checker(torch_checker)
+            triton_checker.register_required_checker(cuda_checker)
             self.register_required_checker(triton_checker)
         else:
             # deeplink
@@ -60,6 +64,15 @@ class EngineChecker(BaseChecker):
             for adapter in adapter_paths:
                 adapter_checker = AdapterChecker(adapter, logger=logger)
                 self.register_required_checker(adapter_checker)
+
+        # dist
+        dist_checker = DistChecker(engine_config.tp,
+                                   engine_config.dp,
+                                   engine_config.ep,
+                                   engine_config.distributed_executor_backend,
+                                   device_type=engine_config.device_type,
+                                   logger=logger)
+        self.register_required_checker(dist_checker)
 
     def check(self):
         """check."""

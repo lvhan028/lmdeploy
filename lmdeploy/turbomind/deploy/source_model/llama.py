@@ -7,8 +7,8 @@ import re
 import torch
 
 from lmdeploy.archs import get_model_arch
-from lmdeploy.tokenizer import Tokenizer
 
+from ..config import RopeParam
 from ..loader import create_loader
 from .base import INPUT_MODELS, BaseInputModel, BaseReader
 
@@ -45,15 +45,15 @@ class LlamaReader(BaseReader):
 
     def tok_embeddings(self):
         """Get embeddings."""
-        return self.params.get(self.tok_embeddings_key, None)
+        return self.transform(self.params.get(self.tok_embeddings_key, None), 'weight')
 
     def norm_weight(self):
         """Get norm."""
-        return self.params.get(self.norm_weight_key, None)
+        return self.transform(self.params.get(self.norm_weight_key, None), 'weight')
 
     def output_weight(self):
         """Get output."""
-        return self.params.get(self.output_weight_key, None)
+        return self.transform(self.params.get(self.output_weight_key, None), 'weight')
 
     def _transform(self, x: torch.Tensor, kind: str):
         return self.processor(x, kind)
@@ -74,7 +74,7 @@ class LlamaReader(BaseReader):
 
     def attn_norm(self, i: int):
         """Get attn norm for layer i."""
-        return self.params[f'{self.attn_layer_prefix}.{i}.input_layernorm.weight']
+        return self.transform(self.params[f'{self.attn_layer_prefix}.{i}.input_layernorm.weight'], 'weight')
 
     def _ffn(self, i: int, kind: str):
         """Get ffn kind for layer i."""
@@ -94,7 +94,7 @@ class LlamaReader(BaseReader):
 
     def ffn_norm(self, i: int):
         """Get ffn norm for layer i."""
-        return self.params[f'{self.attn_layer_prefix}.{i}.post_attention_layernorm.weight']
+        return self.transform(self.params[f'{self.attn_layer_prefix}.{i}.post_attention_layernorm.weight'], 'weight')
 
 
 @INPUT_MODELS.register_module(name='llama')
@@ -114,17 +114,7 @@ class LlamaModel(BaseInputModel):
         for i, param in loader.items():
             reader = self.Reader(param, {}, False, self.model_config, policy=self.policy)
             yield i, reader
-
-    def tokenizer_info(self):
-        """Read tokenizer info."""
-        assert osp.isdir(self.model_path), self.model_path
-        tk_model = Tokenizer(self.model_path)
-        n_words = tk_model.vocab_size
-        bos_id = tk_model.bos_token_id
-        eos_id = tk_model.eos_token_id
-        # bos_id may be None
-        bos_id = bos_id or 0
-        return n_words, bos_id, eos_id
+        torch.cuda.empty_cache()
 
     def model_info(self):
         """Read model info."""
@@ -141,43 +131,53 @@ class LlamaModel(BaseInputModel):
             else:
                 kv_head_num = model_arg['num_attention_heads']
             hidden_units = model_arg['hidden_size']
+            head_dim = model_arg.get('head_dim', hidden_units // attn_head_num)
+            # compute rope param
             rope_theta = float(model_arg.get('rope_theta', 10000.0))
             max_position_embeddings = int(model_arg.get('max_position_embeddings', 0))
+            rope_param = RopeParam(type='default', base=rope_theta, dim=head_dim)
             rope_scaling = model_arg.get('rope_scaling', None)
-            head_dim = model_arg.get('head_dim', hidden_units // attn_head_num)
-            scaling_factor = 0.0
-            use_dynamic_ntk = 0
-            scaling_type = ''
-            low_freq_factor = 1.0
-            high_freq_factor = 1.0
-            attention_factor = -1.0
-            beta_fast = 32.0
-            beta_slow = 1.0
-            original_max_position_embeddings = 0
             if isinstance(rope_scaling, dict):
                 llama2_scaling_type = rope_scaling.get('type', '')
                 llama3_scaling_type = rope_scaling.get('rope_type', '')
-                if llama2_scaling_type and llama3_scaling_type:
+                if llama2_scaling_type and llama3_scaling_type \
+                        and llama2_scaling_type != llama3_scaling_type:
                     raise ValueError(f'Ambiguous rope_scaling in config: {model_arg}')
                 scaling_type = llama2_scaling_type if llama2_scaling_type \
                     else llama3_scaling_type
                 scaling_factor = rope_scaling.get('factor', 0.0)
                 if scaling_type == 'dynamic':
-                    use_dynamic_ntk = 1
+                    rope_param.__dict__.update(type='dynamic',
+                                               factor=scaling_factor,
+                                               max_position_embeddings=max_position_embeddings)
+                elif scaling_type == 'linear':
+                    rope_param.__dict__.update(type='linear', factor=scaling_factor)
                 elif scaling_type == 'llama3':
                     low_freq_factor = rope_scaling.get('low_freq_factor', 1.0)
                     high_freq_factor = rope_scaling.get('high_freq_factor', 1.0)
                     original_max_position_embeddings = model_arg['rope_scaling'].get(
                         'original_max_position_embeddings', 0)
+                    rope_param.__dict__.update(type='llama3',
+                                               factor=scaling_factor,
+                                               low_freq_factor=low_freq_factor,
+                                               high_freq_factor=high_freq_factor,
+                                               original_max_position_embeddings=original_max_position_embeddings)
                 elif scaling_type == 'yarn':
                     attention_factor = rope_scaling.get('attention_factor', None)
                     if attention_factor is None:
                         attention_factor = 0.1 * math.log(scaling_factor) + 1.0
                     beta_fast = rope_scaling.get('beta_fast', 32.0)
                     beta_slow = rope_scaling.get('beta_slow', 1.0)
+                    rope_param.__dict__.update(type='yarn',
+                                               factor=scaling_factor,
+                                               max_position_embeddings=max_position_embeddings,
+                                               attention_factor=attention_factor,
+                                               beta_fast=beta_fast,
+                                               beta_slow=beta_slow)
+                else:
+                    raise RuntimeError(f'Unsupported rope type: {scaling_type}')
 
         return dict(size_per_head=head_dim,
-                    rotary_embedding=head_dim,
                     num_layer=num_layer,
                     norm_eps=norm_eps,
                     head_num=attn_head_num,
@@ -185,14 +185,5 @@ class LlamaModel(BaseInputModel):
                     hidden_units=hidden_units,
                     inter_size=inter_size,
                     vocab_size=vocab_size,
-                    rope_theta=rope_theta,
                     max_position_embeddings=max_position_embeddings,
-                    original_max_position_embeddings=original_max_position_embeddings,
-                    use_dynamic_ntk=use_dynamic_ntk,
-                    rope_scaling_type=scaling_type,
-                    rope_scaling_factor=scaling_factor,
-                    low_freq_factor=low_freq_factor,
-                    high_freq_factor=high_freq_factor,
-                    attention_factor=attention_factor,
-                    beta_fast=beta_fast,
-                    beta_slow=beta_slow)
+                    rope_param=rope_param)

@@ -32,7 +32,7 @@ class LlavaNextVisionModel(LlavaHfVisionModel):
                 del self.model.language_model
 
     def build_model(self):
-        """build the vision part of a VLM model when backend is turbomind, or
+        """Build the vision part of a VLM model when backend is turbomind, or
         load the whole VLM model when `self.with_llm==True`"""
         from accelerate import load_checkpoint_and_dispatch
         from accelerate.utils import get_balanced_memory, infer_auto_device_map
@@ -64,7 +64,7 @@ class LlavaNextVisionModel(LlavaHfVisionModel):
         self.model.eval()
 
     def preprocess(self, messages: List[Dict]) -> List[Dict]:
-        """refers to the spec of `super.preprocess()"""
+        """Refers to the spec of `super.preprocess()"""
         from transformers.models.llava_next.modeling_llava_next import image_size_to_num_patches
         images = self.collect_images(messages)
         outputs = []
@@ -93,14 +93,14 @@ class LlavaNextVisionModel(LlavaHfVisionModel):
                 dict(image_size=image.size,
                      image_patches=image_num_patches,
                      image_tokens=image_tokens,
-                     image_token_id=0))
+                     image_token_id=self.image_token_id))
             outputs.append(result)
         messages.append(dict(role='preprocess', content=outputs))
         return messages
 
     @torch.no_grad()
     def forward(self, messages: List[Dict], max_batch_size: int = 1) -> List[Dict]:
-        """extract image feature. ONLY implement it when the backend is
+        """Extract image feature. ONLY implement it when the backend is
         turbomind engine.
 
         Args:

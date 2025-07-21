@@ -23,7 +23,12 @@ class CogVLMVisionModel(VisonModel):
         ])
         image_size = self.hf_config.vision_config['image_size']
         patch_size = self.hf_config.vision_config['patch_size']
-        self.n_token_per_image = 2 + (image_size // patch_size // 2)**2
+        if self.hf_config.vision_config['num_positions'] == 1226:
+            # cogvlm-chat-hf, https://huggingface.co/THUDM/cogvlm-chat-hf/blob/e29dc3ba206d524bf8efbfc60d80fc4556ab0e3c/modeling_cogvlm.py#L820 # noqa E501
+            self.n_token_per_image = 2 + (image_size // patch_size)**2
+        else:
+            # cogvlm2, https://huggingface.co/THUDM/cogvlm2-llama3-chinese-chat-19B/blob/2c2226281325649d49b8aa237a932367c7da4f26/modeling_cogvlm.py#L819 # noqa E501
+            self.n_token_per_image = 2 + (image_size // patch_size // 2)**2
 
     def build_model(self):
         if self.with_llm:
@@ -35,7 +40,7 @@ class CogVLMVisionModel(VisonModel):
             raise NotImplementedError('turbomind has not supported cogvlm yet')
 
     def preprocess(self, messages: List[Dict]) -> List[Dict]:
-        """refer to the spec of `super().preprocess`"""
+        """Refer to the spec of `super().preprocess`"""
         images = self.collect_images(messages)
         outputs = []
         for image, _ in images:
@@ -45,13 +50,13 @@ class CogVLMVisionModel(VisonModel):
                 dict(pixel_values=pixel_values,
                      image_size=image.size,
                      image_tokens=self.n_token_per_image,
-                     image_token_id=0))
+                     image_token_id=self.image_token_id))
         messages.append(dict(role='preprocess', content=outputs))
         return messages
 
     @staticmethod
     def proc_messages(messages, chat_template, sequence_start):
-        """apply chat template to get the prompt."""
+        """Apply chat template to get the prompt."""
         prompt_messages = []
         for message in messages:
             if isinstance(message['content'], str):
@@ -59,7 +64,7 @@ class CogVLMVisionModel(VisonModel):
                 continue
             elif message['role'] in ['images', 'preprocess', 'forward']:
                 continue
-            content = [x['text'] for x in message['content'] if x['type'] == 'text']
+            content = [x.get('text', '') for x in message['content'] if x['type'] == 'text']
             n_images = len([1 for x in message['content'] if x['type'] == 'image'])
 
             prompt_messages.append(dict(role='user', content=content[0], num_images=n_images))

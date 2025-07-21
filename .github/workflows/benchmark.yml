@@ -15,7 +15,7 @@ on:
         default: 'main'
       benchmark_type:
         required: true
-        description: 'Set benchmark type. Default is "["generation", "throughtput", "api_server"]"'
+        description: 'Set benchmark type. Default is "["generation", "throughput", "api_server"]"'
         type: string
         default: "['apiserver', 'generation', 'throughput']"
       offline_mode:
@@ -106,7 +106,6 @@ jobs:
           # manually install flash attn
           # the install packeage from. https://github.com/Dao-AILab/flash-attention/releases
           python3 -m pip install /root/packages/flash_attn-*.whl
-          python3 -m pip install /root/packages/xformers-*.whl --no-deps
           python3 -m pip install -r /nvme/qa_test_models/offline_pkg/requirements.txt
       - name: Install lmdeploy
         if: ${{github.event_name == 'schedule' || !inputs.offline_mode}}
@@ -127,9 +126,10 @@ jobs:
           ln -s ${{env.REPORT_DIR}}/allure-results/.pytest_cache autotest
       - name: Run other benchmark
         run: |
-            pytest autotest/benchmark/test_${{matrix.benchmark_type}}_performance.py -n 8 --run_id ${{ github.run_id }} -m gpu_num_1 ${{env.FAIL_CONFIG}} --alluredir=${{env.REPORT_DIR}}/allure-results || true
-            pytest autotest/benchmark/test_${{matrix.benchmark_type}}_performance.py -n 4 --run_id ${{ github.run_id }} -m gpu_num_2 ${{env.FAIL_CONFIG}} --alluredir=${{env.REPORT_DIR}}/allure-results || true
-            pytest autotest/benchmark/test_${{matrix.benchmark_type}}_performance.py -n 2 --run_id ${{ github.run_id }} -m gpu_num_4 ${{env.FAIL_CONFIG}} --alluredir=${{env.REPORT_DIR}}/allure-results
+            pytest autotest/benchmark/test_${{matrix.benchmark_type}}_performance.py -n 8 --run_id ${{ github.run_id }} -m 'gpu_num_1 and not pr_test' ${{env.FAIL_CONFIG}} --alluredir=${{env.REPORT_DIR}}/allure-results || true
+            pytest autotest/benchmark/test_${{matrix.benchmark_type}}_performance.py -n 4 --run_id ${{ github.run_id }} -m 'gpu_num_2 and not pr_test' ${{env.FAIL_CONFIG}} --alluredir=${{env.REPORT_DIR}}/allure-results || true
+            pytest autotest/benchmark/test_${{matrix.benchmark_type}}_performance.py -n 2 --run_id ${{ github.run_id }} -m 'gpu_num_4 and not pr_test' ${{env.FAIL_CONFIG}} --alluredir=${{env.REPORT_DIR}}/allure-results || true
+            pytest autotest/benchmark/test_${{matrix.benchmark_type}}_performance.py --run_id ${{ github.run_id }} -m 'gpu_num_8 and not pr_test' ${{env.FAIL_CONFIG}} --alluredir=${{env.REPORT_DIR}}/allure-results
       - name: Clear workfile
         if: always()
         run: |

@@ -13,8 +13,10 @@
 # limitations under the License.
 
 add_subdirectory(utils)
+add_subdirectory(core)
 add_subdirectory(kernels)
 add_subdirectory(layers)
+add_subdirectory(comm)
 add_subdirectory(models)
 add_subdirectory(engine)
 if(BUILD_PYT)

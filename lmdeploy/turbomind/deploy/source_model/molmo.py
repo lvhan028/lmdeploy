@@ -4,6 +4,7 @@ import os.path as osp
 
 import torch
 
+from ..config import RopeParam
 from .base import INPUT_MODELS
 from .llama import LlamaModel, LlamaReader
 
@@ -83,13 +84,6 @@ class MolmoModel(LlamaModel):
         with open(config_path) as f:
             self.config = json.load(f)
 
-    def tokenizer_info(self):
-
-        n_words = 152064
-        bos_id = 151643
-        eos_id = 151643
-        return n_words, bos_id, eos_id
-
     def model_info(self):
         config = self.config
         num_layer = config['num_hidden_layers']
@@ -104,6 +98,7 @@ class MolmoModel(LlamaModel):
         additional_vocab_size = 128
         inter_size = config['intermediate_size'] // 2
         attn_bias = config['qkv_bias']
+        rope_param = RopeParam(type='default', base=rope_theta, dim=hidden_units // attn_head_num)
         return dict(
             num_layer=num_layer,
             norm_eps=norm_eps,
@@ -115,6 +110,6 @@ class MolmoModel(LlamaModel):
             vocab_size=vocab_size,
             # https://huggingface.co/allenai/Molmo-7B-D-0924/blob/main/modeling_molmo.py#L564
             embedding_size=vocab_size + additional_vocab_size,
-            rope_theta=rope_theta,
+            rope_param=rope_param,
             max_position_embeddings=max_position_embeddings,
         )

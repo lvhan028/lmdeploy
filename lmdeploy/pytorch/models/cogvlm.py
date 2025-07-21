@@ -4,12 +4,12 @@ from argparse import Namespace
 from typing import Any, Iterable, List, Optional, Tuple
 
 import torch
-import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
 from transformers.configuration_utils import PretrainedConfig
 
-from lmdeploy.pytorch.distributed import get_world_rank
+import lmdeploy.pytorch.distributed as dist
+from lmdeploy.pytorch.distributed import get_tp_world_rank
 from lmdeploy.pytorch.engine.input_process import BaseModelInputProcessor, PreprocessInputResult
 from lmdeploy.pytorch.model_inputs import StepContext, StepContextManager
 from lmdeploy.pytorch.multimodal.data_type import MultiModalTensor
@@ -85,7 +85,7 @@ class VisionExpertAttention(nn.Module):
                                                           device=device,
                                                           is_tp=True,
                                                           all_reduce=False)
-        world_size, _ = get_world_rank()
+        world_size, _ = get_tp_world_rank()
         self.world_size = world_size
         self.all_reduce = world_size > 1
 
@@ -198,13 +198,13 @@ class MLP(nn.Module):
 
 
 class VisionExpertMLP(nn.Module):
-    """vision expert mlp."""
+    """Vision expert mlp."""
 
     def __init__(self, config: PretrainedConfig, dtype: torch.dtype = None, device: torch.device = None):
         super().__init__()
         self.language_mlp = MLP(config, dtype=dtype, device=device)
         self.vision_mlp = MLP(config, dtype=dtype, device=device)
-        world_size, _ = get_world_rank()
+        world_size, _ = get_tp_world_rank()
         self.all_reduce = world_size > 1
 
     def forward(
@@ -228,7 +228,7 @@ class VisionExpertMLP(nn.Module):
 
 
 class CogVLMDecoderLayer(nn.Module):
-    """decoder layer."""
+    """Decoder layer."""
 
     def __init__(self,
                  config: PretrainedConfig,
@@ -299,7 +299,7 @@ class CogVLMDecoderLayer(nn.Module):
 
 
 class PatchEmbedding(nn.Module):
-    """vision embedding."""
+    """Vision embedding."""
 
     def __init__(self, config: PretrainedConfig, dtype: torch.dtype = None, device: torch.device = None):
         super().__init__()
@@ -323,7 +323,7 @@ class PatchEmbedding(nn.Module):
 
 
 class EVA2CLIPAttention(nn.Module):
-    """vision attention."""
+    """Vision attention."""
 
     def __init__(self, config: PretrainedConfig, dtype: torch.dtype = None, device: torch.device = None):
         super().__init__()
@@ -374,7 +374,7 @@ class EVA2CLIPAttention(nn.Module):
 
 
 class EVA2CLIPMLP(nn.Module):
-    """vision MLP."""
+    """Vision MLP."""
 
     def __init__(self, config: PretrainedConfig, dtype: torch.dtype = None, device: torch.device = None):
         super().__init__()
@@ -416,7 +416,7 @@ class EVA2CLIPMLP(nn.Module):
 
 
 class EVA2CLIPTransformerLayer(nn.Module):
-    """vision trans layer."""
+    """Vision trans layer."""
 
     def __init__(self, config: PretrainedConfig, dtype: torch.dtype = None, device: torch.device = None):
         super().__init__()
@@ -440,7 +440,7 @@ class EVA2CLIPTransformerLayer(nn.Module):
 
 
 class EVA2CLIPTransformer(nn.Module):
-    """vision transformer."""
+    """Vision transformer."""
 
     def __init__(self, config: PretrainedConfig, dtype: torch.dtype = None, device: torch.device = None):
         super().__init__()
@@ -488,7 +488,7 @@ class GLU(nn.Module):
 
 
 class EVA2CLIPModel(nn.Module):
-    """vision model."""
+    """Vision model."""
 
     def __init__(self, config: PretrainedConfig, dtype: torch.dtype = None, device: torch.device = None):
         super().__init__()
@@ -497,12 +497,17 @@ class EVA2CLIPModel(nn.Module):
         self.patch_embedding = PatchEmbedding(vision_config, dtype=dtype, device=device)
         self.transformer = EVA2CLIPTransformer(vision_config, dtype=dtype, device=device)
         self.linear_proj = GLU(config, in_features=vision_config.hidden_size, dtype=dtype, device=device)
-        self.conv = nn.Conv2d(in_channels=vision_config.hidden_size,
-                              out_channels=vision_config.hidden_size,
-                              kernel_size=2,
-                              stride=2,
-                              dtype=dtype,
-                              device=device)
+        if vision_config.num_positions == 1226:
+            # cogvlm-chat-hf
+            self.conv = None
+        else:
+            # cogvlm2
+            self.conv = nn.Conv2d(in_channels=vision_config.hidden_size,
+                                  out_channels=vision_config.hidden_size,
+                                  kernel_size=2,
+                                  stride=2,
+                                  dtype=dtype,
+                                  device=device)
         self.boi = nn.Parameter(torch.empty(1, 1, config.hidden_size, dtype=dtype, device=device))
         self.eoi = nn.Parameter(torch.empty(1, 1, config.hidden_size, dtype=dtype, device=device))
 
@@ -512,13 +517,14 @@ class EVA2CLIPModel(nn.Module):
         x = self.transformer(x)
 
         x = x[:, 1:]
+        # cogvlm2
+        if self.conv is not None:
+            b, s, h = x.shape
+            grid_size = int(s**0.5)
+            x = x.view(b, grid_size, grid_size, h).permute(0, 3, 1, 2)
+            x = self.conv(x)
 
-        b, s, h = x.shape
-        grid_size = int(s**0.5)
-        x = x.view(b, grid_size, grid_size, h).permute(0, 3, 1, 2)
-        x = self.conv(x)
-
-        x = x.flatten(2).transpose(1, 2)
+            x = x.flatten(2).transpose(1, 2)
         x = self.linear_proj(x)
         boi = self.boi.expand(x.shape[0], -1, -1)
         eoi = self.eoi.expand(x.shape[0], -1, -1)
@@ -613,7 +619,7 @@ class CogVLMModel(nn.Module):
         return hidden_states
 
     def get_input_embeddings(self):
-        """get input embeddings."""
+        """Get input embeddings."""
         return self.embed_tokens
 
 
@@ -662,7 +668,7 @@ class CogVLMForCausalLM(nn.Module, CudaGraphMixin, DeployModelMixin):
         vision_ids: torch.LongTensor = None,
         **kwargs,
     ):
-        """model forward, return logits."""
+        """Model forward, return logits."""
         hidden_states = self.model(
             input_ids=input_ids,
             position_ids=position_ids,
@@ -676,11 +682,11 @@ class CogVLMForCausalLM(nn.Module, CudaGraphMixin, DeployModelMixin):
         return hidden_states
 
     def get_logits(self, hidden_states: torch.Tensor):
-        """compute logits of the model output."""
+        """Compute logits of the model output."""
         return self.lm_head(hidden_states)
 
     def get_input_embeddings(self):
-        """get input embeddings."""
+        """Get input embeddings."""
         return self.model.get_input_embeddings()
 
     def prepare_inputs_for_generation(
@@ -689,7 +695,7 @@ class CogVLMForCausalLM(nn.Module, CudaGraphMixin, DeployModelMixin):
         inputs_embeds: Optional[torch.Tensor] = None,
         context: StepContext = None,
     ):
-        """prepare input."""
+        """Prepare input."""
         # get input_ids, position_ids and attention metadatas
         input_ids = context.input_ids
 
@@ -740,7 +746,7 @@ class CogVLMForCausalLM(nn.Module, CudaGraphMixin, DeployModelMixin):
         )
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
-        """load weights."""
+        """Load weights."""
         # modify from vllm
         stacked_params_mapping = [
             # (param_name, shard_name, shard_id)
@@ -786,7 +792,7 @@ class CogVLMForCausalLM(nn.Module, CudaGraphMixin, DeployModelMixin):
                            past_key_values: List[List[torch.Tensor]],
                            inputs_embeds: Optional[torch.Tensor] = None,
                            context: StepContext = None):
-        """update model meta."""
+        """Update model meta."""
         model_metas = context.model_metas
         input_multimodals = context.input_multimodals
         if input_multimodals is None:
@@ -799,11 +805,7 @@ class CogVLMForCausalLM(nn.Module, CudaGraphMixin, DeployModelMixin):
                 else:
                     input_imgs.append(mm.get('image', []))
 
-        config = self.config
-        image_size: int = config.vision_config['image_size']
-        patch_size: int = config.vision_config['patch_size']
-        vision_token_num = ((image_size // patch_size // 2) * (image_size // patch_size // 2) + 2)
-        num_pad = vision_token_num - 3
+        num_pad = self.input_processor.vision_token_num - 3
 
         batched_num_img_tokens = []
         new_model_metas = []
@@ -857,22 +859,27 @@ class CogVLMForCausalLM(nn.Module, CudaGraphMixin, DeployModelMixin):
         return new_model_metas
 
     def get_input_processor(self) -> BaseModelInputProcessor:
-        """get input processor."""
+        """Get input processor."""
         return self.input_processor
 
 
 class CogVLMInputProcessor(BaseModelInputProcessor):
-    """input processor."""
+    """Input processor."""
 
     def __init__(self, config: PretrainedConfig, dtype) -> None:
         self.config = config
         self.dtype = dtype
         image_size: int = config.vision_config['image_size']
         patch_size: int = config.vision_config['patch_size']
-        self.vision_token_num = ((image_size // patch_size // 2) * (image_size // patch_size // 2) + 2)
+        if config.vision_config['num_positions'] == 1226:
+            # # cogvlm-chat-hf
+            self.vision_token_num = 2 + (image_size // patch_size)**2
+        else:
+            # cogvlm2
+            self.vision_token_num = 2 + (image_size // patch_size // 2)**2
 
     def preprocess_input(self, input_ids: List[int], input_multimodals=None, **kwargs) -> PreprocessInputResult:
-        """prepare multimodal input."""
+        """Prepare multimodal input."""
         if input_multimodals is None or len(input_multimodals) == 0:
             return input_ids, input_multimodals
 
@@ -880,7 +887,7 @@ class CogVLMInputProcessor(BaseModelInputProcessor):
         for input_mm in input_multimodals:
             pixel_values = input_mm['pixel_values'].to(self.dtype)
             offset = input_mm['offset']
-            image_token_id = input_mm.get('image_token_id', 0)
+            image_token_id = input_mm['image_token_id']
             num_pad = input_mm['image_tokens']
             if isinstance(num_pad, torch.Tensor):
                 num_pad = num_pad.item()

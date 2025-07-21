@@ -23,6 +23,9 @@ SUPPORTED_ARCHS = dict(
     # Qwen2
     Qwen2ForCausalLM='qwen2',
     Qwen2MoeForCausalLM='qwen2-moe',
+    # Qwen3
+    Qwen3ForCausalLM='qwen3',
+    Qwen3MoeForCausalLM='qwen3-moe',
     # mistral
     MistralForCausalLM='llama',
     # llava
@@ -33,6 +36,8 @@ SUPPORTED_ARCHS = dict(
     InternLMXComposer2ForCausalLM='xcomposer2',
     # internvl
     InternVLChatModel='internvl',
+    # internvl3
+    InternVLForConditionalGeneration='internvl',
     # deepseek-vl
     MultiModalityCausalLM='deepseekvl',
     DeepseekV2ForCausalLM='deepseek2',
@@ -40,7 +45,6 @@ SUPPORTED_ARCHS = dict(
     MiniCPMV='minicpmv',
     # mini gemini
     MGMLlamaForCausalLM='llama',
-    MiniGeminiLlamaForCausalLM='llama',
     # chatglm2/3, glm4
     ChatGLMModel='glm4',
     ChatGLMForConditionalGeneration='glm4',
@@ -108,7 +112,7 @@ def is_supported(model_path: str):
             elif arch == 'InternVLChatModel':
                 llm_arch = cfg.llm_config.architectures[0]
                 support_by_turbomind = (llm_arch in SUPPORTED_ARCHS and _is_head_dim_supported(cfg.llm_config))
-            elif arch == 'LlavaForConditionalGeneration':
+            elif arch in ['LlavaForConditionalGeneration', 'InternVLForConditionalGeneration']:
                 llm_arch = cfg.text_config.architectures[0]
                 if llm_arch in ['Qwen2ForCausalLM', 'LlamaForCausalLM']:
                     support_by_turbomind = _is_head_dim_supported(cfg.text_config)
@@ -116,5 +120,8 @@ def is_supported(model_path: str):
                 kv_heads = cfg.num_key_value_heads
                 # TM hasn't supported allenai/Molmo-7B-O-0924 yet
                 support_by_turbomind = kv_heads is not None
+            elif arch == 'DeepseekV2ForCausalLM':
+                if getattr(cfg, 'vision_config', None) is not None:
+                    support_by_turbomind = False
 
     return support_by_turbomind

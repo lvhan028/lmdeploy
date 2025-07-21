@@ -1,6 +1,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import math
 
+from ..config import RopeParam
 from .base import INPUT_MODELS
 from .llama import LlamaModel, LlamaReader
 
@@ -79,12 +80,6 @@ class DeepSeek2Model(LlamaModel):
 
     Reader = DeepSeek2Reader
 
-    def tokenizer_info(self):
-        n_words = self.model_config['vocab_size']
-        bos_id = self.model_config['bos_token_id']
-        eos_id = self.model_config['eos_token_id']
-        return n_words, bos_id, eos_id
-
     def model_info(self):
         cfg = self.model_config
         info = super().model_info()
@@ -106,7 +101,6 @@ class DeepSeek2Model(LlamaModel):
                     qk_rope_dim=qk_rope_dim,
                     v_head_dim=cfg['v_head_dim'],
                     size_per_head=size_per_head,
-                    rotary_embedding=qk_rope_dim,
                     expert_num=expert_num,
                     expert_inter_size=expert_inter_size,
                     experts_per_token=experts_per_token,
@@ -117,11 +111,13 @@ class DeepSeek2Model(LlamaModel):
                     topk_group=cfg['topk_group'],
                     moe_group_num=cfg['n_group'],
                     tune_layer_num=2)
+        rope_param: RopeParam = info['rope_param']
+        rope_param.dim = qk_rope_dim
         rope_scaling = cfg.get('rope_scaling')
         if rope_scaling and rope_scaling['type'] == 'yarn':
             attention_factor, softmax_scale = get_yarn_params(rope_scaling)
             softmax_scale *= size_per_head**(-0.5)
-            info.update(max_position_embeddings=rope_scaling['original_max_position_embeddings'],
-                        attention_factor=attention_factor,
-                        softmax_scale=softmax_scale)
+            rope_param.max_position_embeddings = rope_scaling['original_max_position_embeddings']
+            rope_param.attention_factor = attention_factor
+            info.update(rope_param=rope_param, softmax_scale=softmax_scale)
         return info

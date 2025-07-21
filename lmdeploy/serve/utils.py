@@ -17,7 +17,44 @@ PromptType = Union[str, List[Dict]]
 
 
 class LogitsMixin:
-    """Helper class to calculate ppl."""
+    """Helper class to get logits, reward score and calculate ppl."""
+
+    def get_reward_score(self, input_ids: List) -> List[float]:
+        """
+        Args:
+            input_ids(List): a list of token_id or a list of token_id list or a tensor containing
+                token_ids
+        Return:
+            reward score in a list. If the input_ids is a list of token_id, the return value
+            is still a list with length 1.
+        """
+        supported_reward_models = ['InternLM2ForRewardModel', 'Qwen2ForRewardModel']
+        if self.arch not in supported_reward_models:
+            raise ValueError(f'{self.arch} is not in reward model list: {supported_reward_models}')
+        assert isinstance(input_ids, List)
+        assert all(isinstance(x, int) for x in input_ids) or all(isinstance(x, List) for x in input_ids)
+        # Make input_ids a list of token_id list
+        input_ids = [input_ids] if isinstance(input_ids[0], int) else input_ids
+        logits = self._run(coro=self._async_get_logits(input_ids=input_ids)).result()
+        logits = [x.squeeze() for x in logits]
+        scores = [x[-1].cpu().item() for x in logits]
+        return scores
+
+    async def _async_get_reward_score(self, input_ids: List) -> List[float]:
+        """Async version of get_reward_score."""
+        supported_reward_models = ['InternLM2ForRewardModel', 'Qwen2ForRewardModel']
+        if self.arch not in supported_reward_models:
+            raise ValueError(f'{self.arch} is not in reward model list: {supported_reward_models}')
+        assert isinstance(input_ids, List)
+        assert all(isinstance(x, int) for x in input_ids) or all(isinstance(x, List) for x in input_ids)
+        # Make input_ids a list of token_id list
+        input_ids = [input_ids] if isinstance(input_ids[0], int) else input_ids
+
+        logits = await self._async_get_logits(input_ids=input_ids)
+
+        logits = [x.squeeze() for x in logits]
+        scores = [x[-1].cpu().item() for x in logits]
+        return scores
 
     async def _async_get_logits(self,
                                 input_ids,
@@ -34,7 +71,9 @@ class LogitsMixin:
                 input_len = len(input_ids[i])
                 # TODO(lvhan): Fix the ugly code later on
                 max_new_tokens = 1 if self.backend == 'turbomind' else 0
-                gen_config = GenerationConfig(max_new_tokens=max_new_tokens, output_logits='all')
+                # The reason to set `top_k=1` is that pt engine crashes at top_k sampling stage
+                # when perform inference on a reward model.
+                gen_config = GenerationConfig(max_new_tokens=max_new_tokens, output_logits='all', top_k=1)
                 async with self.safe_run(inst,
                                          session_id=i,
                                          input_ids=input_ids[i],
@@ -46,12 +85,13 @@ class LogitsMixin:
                     async for outputs in gen:
                         pass
                     logits[i] = outputs.logits[:input_len, :]
-                if sequence_end and self.backend == 'pytorch':
-                    await inst.async_end(session_id=i)
 
+        session_ids = list(range(len(input_ids)))
         tasks = [_proc(i) for i in range(len(input_ids))]
         await asyncio.gather(*tasks)
-
+        if sequence_end and self.backend == 'pytorch':
+            for session_id in session_ids:
+                await self.end_session(session_id)
         return logits
 
     def get_ppl(self, input_ids: Union[List[int], List[List[int]]]) -> List[float]:
@@ -134,15 +174,15 @@ class LogitsMixin:
             step = [i]
             # shift token_ids by 1 to the left
             target_ids = input_ids[i + 1:i + 1 + max_input_len]
-
-            loss, target_count = self._get_ppl(input_ids=[token_ids],
-                                               max_input_len=max_input_len,
-                                               target_ids=[target_ids],
-                                               steps=step,
-                                               sequence_start=(i == 0),
-                                               sequence_end=(i + max_input_len >= seq_len))
+            loss = self._get_ppl(input_ids=[token_ids],
+                                 max_input_len=len(token_ids),
+                                 target_ids=[target_ids],
+                                 steps=step,
+                                 sequence_start=(i == 0),
+                                 sequence_end=False)
             losses.extend(loss)
-            target_counts.extend(target_count)
+            target_counts.append(len(target_ids))
+        losses = [loss * target_count for loss, target_count in zip(losses, target_counts)]
         loss_sum = sum(losses)
         target_count = sum(target_counts)
         return loss_sum / target_count
@@ -163,7 +203,7 @@ class LogitsMixin:
         assert sum(lens) <= max_input_len
 
         logger.info(f'get_ppl: bs: {len(input_ids)}, lens: {lens}, '
-                    f'total_len: {total_len}')
+                    f'total_len: {total_len}, steps: {steps}')
         torch.cuda.empty_cache()
 
         logits = self._run(coro=self._async_get_logits(

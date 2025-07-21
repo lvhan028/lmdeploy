@@ -21,7 +21,7 @@ class DlinferAttentionMetadata(AttentionMetadata):
 
 
 class DlinferAttentionImpl(AttentionImpl[DlinferAttentionMetadata]):
-    """dlinfer attention implementation."""
+    """Dlinfer attention implementation."""
 
     def __init__(
         self,
@@ -131,7 +131,11 @@ class DlinferAttentionImpl(AttentionImpl[DlinferAttentionMetadata]):
             max_kv_seq_len=max_kv_seq_len,
             is_decoding=is_decoding,
             block_size=block_size,
+            num_heads=self.num_heads,
+            num_kv_heads=self.num_kv_heads,
+            v_head_size=self.v_head_size,
             attn_mask=attn_mask,
+            softmax_scale=self.scale,
             is_unpaged_prefill=is_unpaged_prefill,
             kv_scales=kv_scales,
             kv_zeros=kv_zeros,
@@ -142,7 +146,7 @@ class DlinferAttentionImpl(AttentionImpl[DlinferAttentionMetadata]):
 
 
 class DlinferAttentionBuilder(AttentionBuilder[DlinferAttentionMetadata]):
-    """dlinfer attention builder."""
+    """Dlinfer attention builder."""
 
     @staticmethod
     def build(

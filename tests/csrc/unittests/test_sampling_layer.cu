@@ -140,7 +140,6 @@ protected:
 
         dynamic_decode_layer = new DynamicDecodeLayer<T>(vocab_size,
                                                          vocab_size,
-                                                         end_id,
                                                          stream,
                                                          cublas_wrapper,
                                                          allocator,
@@ -326,7 +325,7 @@ public:
     }
 };
 
-TYPED_TEST_SUITE(SamplingDecodeTest, FloatType);
+TYPED_TEST_SUITE(SamplingDecodeTest, SamplingTypes);
 
 TYPED_TEST(SamplingDecodeTest, TopK)
 {
@@ -974,7 +973,6 @@ protected:
 
         DynamicDecodeLayer<T>* dynamic_decode_layer = new DynamicDecodeLayer<T>(vocab_size,
                                                                                 vocab_size,
-                                                                                end_id,
                                                                                 stream,
                                                                                 cublas_wrapper,
                                                                                 allocator,
@@ -1064,7 +1062,6 @@ protected:
         const DataType         data_type            = getTensorType<T>();
         DynamicDecodeLayer<T>* dynamic_decode_layer = new DynamicDecodeLayer<T>(vocab_size,
                                                                                 vocab_size,
-                                                                                end_id,
                                                                                 stream,
                                                                                 cublas_wrapper,
                                                                                 allocator,
@@ -1176,7 +1173,7 @@ protected:
     }
 };
 
-TYPED_TEST_SUITE(SamplingDecodeTest2, FloatType);
+TYPED_TEST_SUITE(SamplingDecodeTest2, SamplingTypes);
 
 TYPED_TEST(SamplingDecodeTest2, CorrectnessSingleRandTopK)
 {

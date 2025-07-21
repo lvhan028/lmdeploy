@@ -104,18 +104,23 @@ def autoget_backend_config(
 
 
 def check_vl_llm(config: dict) -> bool:
-    """check if the model is a vl model from model config."""
+    """Check if the model is a vl model from model config."""
     if 'auto_map' in config:
         for _, v in config['auto_map'].items():
             if 'InternLMXComposer2ForCausalLM' in v:
                 return True
 
+    if 'language_config' in config and 'vision_config' in config and config['language_config'].get(
+            'architectures', [None])[0] == 'DeepseekV2ForCausalLM':
+        return True
+
     arch = config['architectures'][0]
     supported_archs = set([
         'LlavaLlamaForCausalLM', 'LlavaMistralForCausalLM', 'CogVLMForCausalLM', 'InternLMXComposer2ForCausalLM',
-        'InternVLChatModel', 'MiniGeminiLlamaForCausalLM', 'MGMLlamaForCausalLM', 'MiniCPMV',
-        'LlavaForConditionalGeneration', 'LlavaNextForConditionalGeneration', 'Phi3VForCausalLM',
-        'Qwen2VLForConditionalGeneration', 'MllamaForConditionalGeneration', 'MolmoForCausalLM'
+        'InternVLChatModel', 'MiniCPMV', 'LlavaForConditionalGeneration', 'LlavaNextForConditionalGeneration',
+        'Phi3VForCausalLM', 'Qwen2VLForConditionalGeneration', 'Qwen2_5_VLForConditionalGeneration',
+        'MllamaForConditionalGeneration', 'MolmoForCausalLM', 'Gemma3ForConditionalGeneration',
+        'Llama4ForConditionalGeneration', 'InternVLForConditionalGeneration'
     ])
     if arch == 'QWenLMHeadModel' and 'visual' in config:
         return True
@@ -129,7 +134,7 @@ def check_vl_llm(config: dict) -> bool:
 
 
 def get_task(model_path: str):
-    """get pipeline type and pipeline class from model config."""
+    """Get pipeline type and pipeline class from model config."""
     from lmdeploy.serve.async_engine import AsyncEngine
 
     if os.path.exists(os.path.join(model_path, 'triton_models', 'weights')):
@@ -145,7 +150,7 @@ def get_task(model_path: str):
 
 
 def get_model_arch(model_path: str):
-    """get a model's architecture and configuration.
+    """Get a model's architecture and configuration.
 
     Args:
         model_path(str): the model path
@@ -178,6 +183,9 @@ def get_model_arch(model_path: str):
                         arch = 'InternLMXComposer2ForCausalLM'
         elif _cfg.get('auto_map', None) and 'AutoModelForCausalLM' in _cfg['auto_map']:
             arch = _cfg['auto_map']['AutoModelForCausalLM'].split('.')[-1]
+        elif _cfg.get('language_config', None) and _cfg['language_config'].get(
+                'auto_map', None) and 'AutoModelForCausalLM' in _cfg['language_config']['auto_map']:
+            arch = _cfg['language_config']['auto_map']['AutoModelForCausalLM'].split('.')[-1]
         else:
             raise RuntimeError(f'Could not find model architecture from config: {_cfg}')
         return arch, cfg

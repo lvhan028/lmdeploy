@@ -1,10 +1,9 @@
 # Copyright (c) OpenMMLab. All rights reserved.
-
 from typing import Optional
 
 import torch
-import torch.distributed as dist
 
+import lmdeploy.pytorch.distributed as dist
 from lmdeploy.pytorch.kernels.cuda.w8a8_triton_kernels import (matmul_kernel_dynamic_quant, per_token_quant_int8,
                                                                rms_norm_dynamic_quant)
 from lmdeploy.pytorch.models.q_modules import QTensor
@@ -13,7 +12,7 @@ from ..qmodules import LinearW8A8Builder, LinearW8A8Impl, RMSNormW8A8Builder, RM
 
 
 class TritonRMSNormW8A8Impl(RMSNormW8A8Impl):
-    """triton RMS norm w8a8 implementation api."""
+    """Triton RMS norm w8a8 implementation api."""
 
     def __init__(self, hidden_size: int, eps: float = 1e-6, quant_dtype: torch.dtype = torch.int8):
         super().__init__()
@@ -38,7 +37,7 @@ class TritonRMSNormW8A8Impl(RMSNormW8A8Impl):
 
 
 class TritonRMSNormBuilder(RMSNormW8A8Builder):
-    """triton RMS norm w8a8 implementation builder."""
+    """Triton RMS norm w8a8 implementation builder."""
 
     @staticmethod
     def build(hidden_size: int, eps: float = 1e-6, quant_dtype: torch.dtype = torch.int8):
@@ -47,7 +46,7 @@ class TritonRMSNormBuilder(RMSNormW8A8Builder):
 
 
 class TritonLinearW8A8Impl(LinearW8A8Impl):
-    """triton linear w8a8 implementation."""
+    """Triton linear w8a8 implementation."""
 
     def __init__(self,
                  in_features: int,
@@ -85,7 +84,7 @@ class TritonLinearW8A8Impl(LinearW8A8Impl):
 
 
 class TritonLinearW8A8Builder(LinearW8A8Builder):
-    """triton linear w8a8 implementation builder."""
+    """Triton linear w8a8 implementation builder."""
 
     @staticmethod
     def build(in_features: int,

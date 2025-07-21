@@ -35,7 +35,7 @@ def run_cmd(cmd_lines: List[str], log_path: str, cwd: str = None):
     cmd_for_run = ' '.join(cmd_lines)
     cmd_for_log = f' {sep}\n'.join(cmd_lines) + '\n'
     with open(log_path, 'w', encoding='utf-8') as file_handler:
-        file_handler.write(f'Command:\n{cmd_for_log}\n')
+        file_handler.write(f'Command: {cmd_for_log}\n')
         file_handler.flush()
         process_res = subprocess.Popen(cmd_for_run, shell=True, cwd=cwd, stdout=file_handler, stderr=file_handler)
         process_res.wait()
@@ -75,7 +75,12 @@ def add_summary(csv_path: str):
         _append_summary('\n')
 
 
-def evaluate(models: List[str], datasets: List[str], workspace: str, evaluate_type: str, is_smoke: bool = False):
+def evaluate(models: List[str],
+             datasets: List[str],
+             workspace: str,
+             evaluate_type: str,
+             max_num_workers: int = 8,
+             is_smoke: bool = False):
     """Evaluate models from lmdeploy using opencompass.
 
     Args:
@@ -93,17 +98,16 @@ def evaluate(models: List[str], datasets: List[str], workspace: str, evaluate_ty
         print(f'Start evaluating {idx+1}/{num_model} {ori_model} ...')
         model = ori_model.lower()
 
-        opencompass_dir = os.path.abspath(os.environ['OPENCOMPASS_DIR'])
         lmdeploy_dir = os.path.abspath(os.environ['LMDEPLOY_DIR'])
         config_path = os.path.join(lmdeploy_dir, f'.github/scripts/eval_{evaluate_type}_config.py')
-        config_path_new = os.path.join(opencompass_dir, 'configs', 'eval_lmdeploy.py')
+        config_path_new = os.path.join(lmdeploy_dir, 'eval_lmdeploy.py')
         if os.path.exists(config_path_new):
             os.remove(config_path_new)
         shutil.copy(config_path, config_path_new)
 
         cfg = Config.fromfile(config_path_new)
         if not hasattr(cfg, model):
-            logging.error(f'Model {model} not found in configuration file')
+            logging.error(f'Model {model} not in configuration file')
             continue
 
         model_cfg = cfg[model]
@@ -116,13 +120,13 @@ def evaluate(models: List[str], datasets: List[str], workspace: str, evaluate_ty
                 f.write("    if d['reader_cfg'] is not None:\n")
                 f.write("        d['reader_cfg']['test_range'] = '[0:50]'\n")
             if model.startswith('hf'):
-                f.write(f'\nmodels = [ *{model} ]\n')
+                f.write(f'\nmodels = [*{model}]\n')
             else:
-                f.write(f'\nmodels = [ {model} ]\n')
+                f.write(f'\nmodels = [{model}]\n')
 
         work_dir = os.path.join(workspace, model)
         cmd_eval = [
-            f'python3 {opencompass_dir}/run.py {config_path_new} -w {work_dir} --reuse --max-num-workers 8 --dump-eval-details'  # noqa: E501
+            f'opencompass {config_path_new} -w {work_dir} --reuse --max-num-workers {max_num_workers}'  # noqa: E501
         ]
         eval_log = os.path.join(workspace, f'eval.{ori_model}.txt')
         start_time = time.time()
@@ -158,7 +162,7 @@ def evaluate(models: List[str], datasets: List[str], workspace: str, evaluate_ty
         if len(crows_pairs_json) == 1:
             with open(crows_pairs_json[0], 'r') as f:
                 acc = json.load(f)['accuracy']
-                acc = f'{float(acc):.2f}'
+                acc = f'{float(acc):.2f}'  # noqa E231
                 model_results['crows_pairs'] = acc
         logging.info(f'\n{model}\n{model_results}')
         dataset_names = list(model_results.keys())
@@ -225,13 +229,17 @@ def generate_benchmark_report(report_path: str):
                     for f in csv_files:
                         df = pd.read_csv(f)
                         merged_df = pd.concat([merged_df, df], ignore_index=True)
+                    if 'throughput' in backend_subfolder:
+                        merged_df = merged_df.sort_values(by=merged_df.columns[1])
 
-                    merged_df = merged_df.sort_values(by=merged_df.columns[0])
+                        grouped_df = merged_df.groupby(merged_df.columns[1])
+                    else:
+                        merged_df = merged_df.sort_values(by=merged_df.columns[0])
 
-                    grouped_df = merged_df.groupby(merged_df.columns[0])
+                        grouped_df = merged_df.groupby(merged_df.columns[0])
                     if 'generation' not in backend_subfolder:
                         average_values = grouped_df.pipe((lambda group: {
-                            'mean': group.mean().round(decimals=3)
+                            'mean': group.mean(numeric_only=True).round(decimals=3)
                         }))['mean']
                         average_values.to_csv(average_csv_path, index=True)
                         avg_df = pd.read_csv(average_csv_path)
@@ -264,6 +272,33 @@ def generate_csv_from_profile_result(file_path: str, out_path: str):
             writer = csv.writer(f)
             writer.writerow(['request_rate', 'completed', 'RPM', 'median_ttft_ms', 'output_throughput'])
             writer.writerows(data_csv)
+
+
+def generate_output_for_evaluation(result_dir: str):
+    # find latest result
+    latest_csv_file = find_csv_files(result_dir)
+    df = pd.read_csv(latest_csv_file)
+    transposed_df = df.T
+    head_part = transposed_df.head(4)
+    tail_part = transposed_df[4:]
+    sorted_tail_part = tail_part.sort_index()
+    transposed_df = pd.concat([head_part, sorted_tail_part])
+    transposed_df.to_csv('transposed_output.csv', header=False, index=True)
+    # output to github action summary
+    add_summary('transposed_output.csv')
+
+
+def find_csv_files(directory):
+    csv_files = []
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            if file.endswith('.csv') and file.startswith('summary'):
+                csv_files.append(os.path.join(root, file))
+
+    csv_files_with_time = {f: os.path.getctime(f) for f in csv_files}
+    sorted_csv_files = sorted(csv_files_with_time.items(), key=lambda x: x[1])
+    latest_csv_file = sorted_csv_files[-1][0]
+    return latest_csv_file
 
 
 if __name__ == '__main__':
