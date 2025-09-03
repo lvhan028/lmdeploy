@@ -27,8 +27,9 @@ permissions:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
-        cudaver: [11.8.0, 12.1.0]
+        cudaver: [11.8.0, 12.8.0]
     name: cuda-${{ matrix.cudaver }}
     runs-on: windows-latest
     steps:
