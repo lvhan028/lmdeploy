@@ -26,6 +26,7 @@ permissions:
 
 jobs:
   build:
+    fail-fast: false
     strategy:
       matrix:
         cudaver: [11.8.0, 12.1.0]
