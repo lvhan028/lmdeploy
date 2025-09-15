@@ -39,7 +39,7 @@ def get_output_file(model_path, backend, server_config):
 
     # For turbomind/pytorch backends
     params = [
-        ('bs', server_config['max_batch_size']),
+        ('bs', server_config.get('max_batch_size', '')),
         ('tp', server_config.get('tp', 1)),
         ('dp', server_config.get('dp', '')),
         ('ep', server_config.get('ep', '')),
@@ -102,7 +102,7 @@ def get_client_cmd(backend: str, server_ip: str, server_port: int, client_config
         # change the key like 'dataset_path' to 'dataset-path' to suit the optional when performing
         # "python3 benchmark/profile_restful_api.py"
         key = key.replace('_', '-')
-        if key == 'disable-warmup':
+        if key in ['disable-warmup', 'disable-tqdm']:
             if str(value).lower() == 'true':
                 cmd.append(f'--{key}')
             continue
@@ -208,10 +208,10 @@ def main(backend: str, config_path: str, model_path: Optional[str] = None):
             server_config = server_config.copy()
             server_config.update(engine_config)  # Merge engine config with server config
             # The model_path provided by the user will override the model_path in the config file.
-            model_path = model_path or server_config.pop('model_path')
+            _model_path = model_path or server_config.pop('model_path')
             # Remove model_path from server_config to avoid passing it to the server command
             server_config.pop('model_path', None)
-            benchmark(model_path, backend, server_config, data_config)
+            benchmark(_model_path, backend, server_config, data_config)
 
 
 if __name__ == '__main__':
