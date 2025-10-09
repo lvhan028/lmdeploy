@@ -229,6 +229,7 @@ class TurbomindEngineConfig:
         hf_overrides (Dict[str, Any]): Huggingface overrides for the model.
             It can be used to override the default config of the model
         enable_metrics (bool): enable metrics system
+        logprobs_mode (str): The mode of logprob, options: ['raw_logits', 'raw_logprobs']
     """
 
     dtype: str = 'auto'
@@ -260,6 +261,7 @@ class TurbomindEngineConfig:
     communicator: str = 'nccl'
     hf_overrides: Optional[Dict[str, Any]] = None
     enable_metrics: bool = False
+    logprobs_mode: str = None
 
     def __post_init__(self):
         """Check input validation."""

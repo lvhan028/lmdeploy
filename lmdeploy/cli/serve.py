@@ -84,14 +84,23 @@ class SubCliServe:
         ArgumentHelper.revision(parser)
         ArgumentHelper.download_dir(parser)
 
+        # multi-node serving args
+        ArgumentHelper.node_rank(parser)
+        ArgumentHelper.num_nodes(parser)
+
         # pytorch engine args
         pt_group = parser.add_argument_group('PyTorch engine arguments')
 
+        ArgumentHelper.dp(pt_group)
+        ArgumentHelper.ep(pt_group)
+        ArgumentHelper.enable_microbatch(pt_group)
+        ArgumentHelper.enable_eplb(pt_group)
+        ArgumentHelper.role(pt_group)
+        ArgumentHelper.migration_backend(pt_group)
         ArgumentHelper.adapters(pt_group)
         ArgumentHelper.device(pt_group)
         ArgumentHelper.eager_mode(pt_group)
         ArgumentHelper.disable_vision_encoder(pt_group)
-        ArgumentHelper.logprobs_mode(pt_group)
         ArgumentHelper.dllm_block_length(pt_group)
         ArgumentHelper.dllm_unmasking_strategy(pt_group)
         ArgumentHelper.dllm_denoising_steps(pt_group)
@@ -110,15 +119,7 @@ class SubCliServe:
         model_format = ArgumentHelper.model_format(pt_group)
         hf_overrides = ArgumentHelper.hf_overrides(pt_group)
         enable_metrics = ArgumentHelper.enable_metrics(pt_group)
-        ArgumentHelper.dp(pt_group)
-        ArgumentHelper.ep(pt_group)
-        ArgumentHelper.enable_microbatch(pt_group)
-        ArgumentHelper.enable_eplb(pt_group)
-        ArgumentHelper.role(pt_group)
-        ArgumentHelper.migration_backend(pt_group)
-        # multi-node serving args
-        ArgumentHelper.node_rank(parser)
-        ArgumentHelper.num_nodes(parser)
+        logprobs_mode = ArgumentHelper.logprobs_mode(pt_group)
 
         # turbomind args
         tb_group = parser.add_argument_group('TurboMind engine arguments')
@@ -135,6 +136,7 @@ class SubCliServe:
         tb_group._group_actions.append(model_format)
         tb_group._group_actions.append(hf_overrides)
         tb_group._group_actions.append(enable_metrics)
+        tb_group._group_actions.append(logprobs_mode)
         ArgumentHelper.rope_scaling_factor(tb_group)
         ArgumentHelper.num_tokens_per_iter(tb_group)
         ArgumentHelper.max_prefill_iters(tb_group)
@@ -230,22 +232,25 @@ class SubCliServe:
             )
         else:
             from lmdeploy.messages import TurbomindEngineConfig
-            backend_config = TurbomindEngineConfig(dtype=args.dtype,
-                                                   tp=args.tp,
-                                                   max_batch_size=max_batch_size,
-                                                   session_len=args.session_len,
-                                                   model_format=args.model_format,
-                                                   quant_policy=args.quant_policy,
-                                                   rope_scaling_factor=args.rope_scaling_factor,
-                                                   cache_max_entry_count=args.cache_max_entry_count,
-                                                   cache_block_seq_len=args.cache_block_seq_len,
-                                                   enable_prefix_caching=args.enable_prefix_caching,
-                                                   max_prefill_token_num=args.max_prefill_token_num,
-                                                   num_tokens_per_iter=args.num_tokens_per_iter,
-                                                   max_prefill_iters=args.max_prefill_iters,
-                                                   communicator=args.communicator,
-                                                   enable_metrics=args.enable_metrics,
-                                                   hf_overrides=args.hf_overrides)
+            backend_config = TurbomindEngineConfig(
+                dtype=args.dtype,
+                tp=args.tp,
+                max_batch_size=max_batch_size,
+                session_len=args.session_len,
+                model_format=args.model_format,
+                quant_policy=args.quant_policy,
+                rope_scaling_factor=args.rope_scaling_factor,
+                cache_max_entry_count=args.cache_max_entry_count,
+                cache_block_seq_len=args.cache_block_seq_len,
+                enable_prefix_caching=args.enable_prefix_caching,
+                max_prefill_token_num=args.max_prefill_token_num,
+                num_tokens_per_iter=args.num_tokens_per_iter,
+                max_prefill_iters=args.max_prefill_iters,
+                communicator=args.communicator,
+                enable_metrics=args.enable_metrics,
+                hf_overrides=args.hf_overrides,
+                logprobs_mode=args.logprobs_mode,
+            )
         chat_template_config = get_chat_template(args.chat_template, args.model_path)
 
         from lmdeploy.messages import VisionConfig
