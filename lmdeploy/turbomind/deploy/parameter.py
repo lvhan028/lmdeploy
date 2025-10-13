@@ -60,6 +60,21 @@ class QuantWeightOnly(Parameter):
         f(i, g('qzeros'), 'zeros', to_half, apply_gs=['w2'])
 
 
+class vLLMCompressorQuantWeightOnly(Parameter):
+    KEYS = '.weight_packed', '.weigth_scale', '.weight_zero_point'
+
+    def __call__(self, f, g, i):
+        """
+        f:
+        g:
+        i: the layer id
+        """
+        # import pdb; pdb.set_trace()
+        f(i, g('weight_packed'), 'qweight', pack_u4_row)
+        f(i, g('weight_scale'), 'scales', to_half, apply_gs=['w2'])
+        f(i, g('weight_zero_point'), 'zeros', to_half, apply_gs=['w2'])
+
+
 class WeightScaleInv(Parameter):
     KEYS = '.weight_scale_inv', '.weight'
 
@@ -105,6 +120,8 @@ def get_params(keys: List[str], bias=0):
         ps.append(PLora())
     if QuantWeightOnly.take(keys):
         ps.append(QuantWeightOnly())
+    if vLLMCompressorQuantWeightOnly.take(keys):
+        ps.append(vLLMCompressorQuantWeightOnly())
     if WeightScaleInv.take(keys):
         ps.append(WeightScaleInv())
     if Mxfp4Weight.take(keys):
