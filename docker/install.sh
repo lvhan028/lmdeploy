@@ -106,4 +106,8 @@ pip install -r /tmp/requirements/serve.txt
 if [[ "${CUDA_VERSION_SHORT}" = "cu118" ]]; then
     rm -rf /opt/py3/lib/python${PYTHON_VERSION}/site-packages/nvidia/nccl
     cp -R /nccl /opt/py3/lib/python${PYTHON_VERSION}/site-packages/nvidia/
+elif [[ "${CUDA_VERSION_SHORT}" = "cu124" ]]; then
+    pip install nvidia-nccl-cu12==2.28.3
+elif [[ "${CUDA_VERSION_SHORT}" = "cu128" ]]; then
+    pip install nvidia-nccl-cu12==2.28.3
 fi
