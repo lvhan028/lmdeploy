@@ -35,5 +35,7 @@ add_library(gloo_comm STATIC
 set_property(TARGET gloo_comm PROPERTY POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(gloo_comm PUBLIC gloo host_comm logger xgrammar)
 
-add_executable(test_ipc_comm test_ipc_comm.cc)
-target_link_libraries(test_ipc_comm PRIVATE gloo_comm Threads::Threads)
+if (BUILD_TEST)
+    add_executable(test_ipc_comm test_ipc_comm.cc)
+    target_link_libraries(test_ipc_comm PRIVATE gloo_comm Threads::Threads)
+endif ()
