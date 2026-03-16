@@ -31,6 +31,17 @@ from lmdeploy.pytorch.disagg.conn.protocol import (DistServeCacheFreeRequest, Di
                                                    MigrationRequest)
 from lmdeploy.serve.async_engine import AsyncEngine
 from lmdeploy.serve.openai.harmony_utils import GptOssChatParser
+from lmdeploy.serve.openai.anthropic_protocol import (AnthropicInputJsonDelta, AnthropicMessageDelta,
+                                                      AnthropicMessagesRequest, AnthropicMessagesResponse,
+                                                      AnthropicResponseTextContent, AnthropicResponseToolUseContent,
+                                                      AnthropicStreamContentBlockDelta,
+                                                      AnthropicStreamContentBlockStart,
+                                                      AnthropicStreamContentBlockStop, AnthropicStreamMessageDelta,
+                                                      AnthropicStreamMessageStart, AnthropicStreamMessageStop,
+                                                      AnthropicStreamPing, AnthropicTextDelta, AnthropicUsage,
+                                                      _finish_reason_to_stop_reason, anthropic_messages_to_openai,
+                                                      anthropic_tools_to_openai, build_anthropic_response,
+                                                      format_sse_event, openai_tool_calls_to_anthropic)
 from lmdeploy.serve.openai.protocol import ChatCompletionResponse  # noqa: E501
 from lmdeploy.serve.openai.protocol import (AbortRequest, ChatCompletionRequest, ChatCompletionResponseChoice,
                                             ChatCompletionResponseStreamChoice, ChatCompletionStreamResponse,
@@ -894,6 +905,283 @@ async def completions_v1(request: CompletionRequest, raw_request: Request = None
         response['remote_token_ids'] = remote_token_ids
 
     return response
+
+
+@router.post('/v1/messages', dependencies=[Depends(check_api_key)])
+async def anthropic_messages_v1(request: AnthropicMessagesRequest, raw_request: Request = None):
+    """Anthropic Messages API endpoint.
+
+    Implements the Anthropic ``POST /v1/messages`` specification so that
+    clients using the official ``anthropic`` Python SDK (or any Anthropic
+    compatible client) can talk to an lmdeploy backend without changes.
+
+    Refer to https://docs.anthropic.com/en/api/messages for the full spec.
+
+    The request should be a JSON object with the following fields:
+    - model: model name. Available from /v1/models.
+    - messages: conversation history in Anthropic format.
+    - max_tokens (int): maximum number of tokens to generate.
+    - system (str | list | None): optional system prompt.
+    - stream (bool): whether to stream the response.
+    - temperature (float): sampling temperature. Default 1.0.
+    - top_p (float | None): nucleus sampling probability.
+    - top_k (int | None): top-k sampling.
+    - stop_sequences (list[str] | None): sequences that stop generation.
+    - tools (list | None): tool definitions.
+    - tool_choice (dict | None): controls tool selection.
+    - metadata (dict | None): request metadata (not used for generation).
+    """
+    VariableInterface.session_id += 1
+    session_id = VariableInterface.session_id
+
+    # Validate model
+    if request.model not in get_model_list():
+        return create_error_response(HTTPStatus.NOT_FOUND, f'The model {request.model!r} does not exist.')
+
+    if VariableInterface.async_engine.id2step.get(session_id, 0) != 0:
+        return create_error_response(HTTPStatus.BAD_REQUEST, f'The session_id {session_id!r} is occupied.')
+
+    model_name = request.model
+    adapter_name = None
+    if model_name != VariableInterface.async_engine.model_name:
+        adapter_name = model_name
+
+    message_id = f'msg_{session_id}'
+
+    # Convert Anthropic messages → OpenAI/internal format
+    openai_messages = anthropic_messages_to_openai(request.messages, request.system)
+
+    # Convert stop sequences
+    stop_words = request.stop_sequences or None
+
+    # Convert tools
+    tools = None
+    if request.tools and (request.tool_choice is None
+                          or not hasattr(request.tool_choice, 'type')
+                          or request.tool_choice.type != 'none'):
+        openai_tools = anthropic_tools_to_openai(request.tools)
+        if VariableInterface.tool_parser is not None:
+            # The tool_parser expects the internal function-only format
+            tools = [t['function'] for t in openai_tools]
+        else:
+            tools = openai_tools
+
+    gen_config = GenerationConfig(
+        max_new_tokens=request.max_tokens,
+        do_sample=True,
+        top_k=request.top_k if request.top_k is not None else 40,
+        top_p=request.top_p if request.top_p is not None else 1.0,
+        temperature=request.temperature if request.temperature is not None else 1.0,
+        stop_words=stop_words,
+        skip_special_tokens=True,
+        spaces_between_special_tokens=True,
+    )
+
+    if tools is not None and VariableInterface.tool_parser is not None:
+        gen_config.skip_special_tokens = False
+
+    result_generator = VariableInterface.async_engine.generate(
+        openai_messages,
+        session_id,
+        gen_config=gen_config,
+        tools=tools,
+        stream_response=True,
+        sequence_start=True,
+        sequence_end=True,
+        do_preprocess=True,
+        adapter_name=adapter_name,
+    )
+
+    # ------------------------------------------------------------------
+    # Streaming response
+    # ------------------------------------------------------------------
+    async def anthropic_stream_generator() -> AsyncGenerator[str, None]:
+        # 1. message_start
+        initial_message = AnthropicMessagesResponse(
+            id=message_id,
+            model=model_name,
+            stop_reason=None,
+            usage=AnthropicUsage(input_tokens=0, output_tokens=0),
+        )
+        start_event = AnthropicStreamMessageStart(message=initial_message)
+        yield format_sse_event('message_start', start_event.model_dump_json())
+
+        # 2. content_block_start (index 0 — text block)
+        block_started = False
+        text_block_index = 0
+        current_tool_block_index = -1
+        tool_blocks_started: List[int] = []
+
+        streaming_tools = False
+        previous_text = ''
+        current_text = ''
+        previous_token_ids: List[int] = []
+        current_token_ids: List[int] = []
+        final_res = None
+
+        async for res in result_generator:
+            final_res = res
+            delta_token_ids = res.token_ids if res.token_ids is not None else []
+            delta_text = res.response or ''
+
+            if VariableInterface.tool_parser is not None:
+                current_text = current_text + delta_text
+                current_token_ids = current_token_ids + delta_token_ids
+
+            # --- Tool parser ---
+            if tools is not None and VariableInterface.tool_parser is not None:
+                if res.finish_reason == 'stop' and streaming_tools:
+                    res.finish_reason = 'tool_calls'
+                tool_delta = VariableInterface.tool_parser.extract_tool_calls_streaming(
+                    previous_text=previous_text,
+                    current_text=current_text,
+                    delta_text=delta_text,
+                    previous_token_ids=previous_token_ids,
+                    current_token_ids=current_token_ids,
+                    delta_token_ids=delta_token_ids,
+                    request=None,
+                )
+                if tool_delta is not None and tool_delta.tool_calls:
+                    streaming_tools = True
+                    # Emit tool_use content blocks
+                    for tc_delta in tool_delta.tool_calls:
+                        idx = tc_delta.index
+                        if idx not in tool_blocks_started:
+                            tool_blocks_started.append(idx)
+                            current_tool_block_index = text_block_index + 1 + idx
+                            # Close text block first if open
+                            if block_started:
+                                yield format_sse_event(
+                                    'content_block_stop',
+                                    AnthropicStreamContentBlockStop(index=text_block_index).model_dump_json(),
+                                )
+                                block_started = False
+                            # Start tool_use block
+                            tool_block = AnthropicResponseToolUseContent(
+                                id=tc_delta.id,
+                                name=tc_delta.function.name or '',
+                                input={},
+                            )
+                            yield format_sse_event(
+                                'content_block_start',
+                                AnthropicStreamContentBlockStart(
+                                    index=current_tool_block_index,
+                                    content_block=tool_block,
+                                ).model_dump_json(),
+                            )
+                        if tc_delta.function and tc_delta.function.arguments:
+                            yield format_sse_event(
+                                'content_block_delta',
+                                AnthropicStreamContentBlockDelta(
+                                    index=current_tool_block_index,
+                                    delta=AnthropicInputJsonDelta(partial_json=tc_delta.function.arguments),
+                                ).model_dump_json(),
+                            )
+                    if VariableInterface.tool_parser is not None:
+                        previous_text = current_text
+                        previous_token_ids = current_token_ids
+                    continue
+
+            if VariableInterface.tool_parser is not None:
+                previous_text = current_text
+                previous_token_ids = current_token_ids
+
+            # --- Regular text delta ---
+            if delta_text:
+                if not block_started:
+                    yield format_sse_event(
+                        'content_block_start',
+                        AnthropicStreamContentBlockStart(
+                            index=text_block_index,
+                            content_block=AnthropicResponseTextContent(text=''),
+                        ).model_dump_json(),
+                    )
+                    yield format_sse_event('ping', AnthropicStreamPing().model_dump_json())
+                    block_started = True
+                yield format_sse_event(
+                    'content_block_delta',
+                    AnthropicStreamContentBlockDelta(
+                        index=text_block_index,
+                        delta=AnthropicTextDelta(text=delta_text),
+                    ).model_dump_json(),
+                )
+
+        # Close open blocks
+        if block_started:
+            yield format_sse_event(
+                'content_block_stop',
+                AnthropicStreamContentBlockStop(index=text_block_index).model_dump_json(),
+            )
+        for idx in tool_blocks_started:
+            blk_idx = text_block_index + 1 + idx
+            yield format_sse_event(
+                'content_block_stop',
+                AnthropicStreamContentBlockStop(index=blk_idx).model_dump_json(),
+            )
+
+        # message_delta
+        finish_reason = final_res.finish_reason if final_res is not None else None
+        stop_reason = _finish_reason_to_stop_reason(finish_reason)
+        output_tokens = final_res.generate_token_len if final_res is not None else 0
+        msg_delta = AnthropicStreamMessageDelta(
+            delta=AnthropicMessageDelta(stop_reason=stop_reason),
+            usage=AnthropicUsage(input_tokens=0, output_tokens=output_tokens),
+        )
+        yield format_sse_event('message_delta', msg_delta.model_dump_json())
+
+        # message_stop
+        yield format_sse_event('message_stop', AnthropicStreamMessageStop().model_dump_json())
+
+    if request.stream:
+        return StreamingResponse(anthropic_stream_generator(), media_type='text/event-stream')
+
+    # ------------------------------------------------------------------
+    # Non-streaming response
+    # ------------------------------------------------------------------
+    final_res = None
+    text = ''
+    async for res in result_generator:
+        if await raw_request.is_disconnected():
+            await VariableInterface.async_engine.stop_session(session_id)
+            return create_error_response(HTTPStatus.BAD_REQUEST, 'Client disconnected')
+        final_res = res
+        text += res.response or ''
+
+    assert final_res is not None
+
+    # Parse tool calls if tool_parser is configured
+    tool_use_blocks: List[AnthropicResponseToolUseContent] = []
+    if tools is not None and VariableInterface.tool_parser is not None:
+        try:
+            from lmdeploy.serve.openai.protocol import ChatCompletionRequest as _CCR
+            _dummy_req = _CCR(model=model_name, messages=[])
+            tool_call_info = VariableInterface.tool_parser.extract_tool_calls(text, request=_dummy_req)
+            text = tool_call_info.content or ''
+            if tool_call_info.tool_calls:
+                if final_res.finish_reason == 'stop':
+                    final_res.finish_reason = 'tool_calls'
+                tool_use_blocks = openai_tool_calls_to_anthropic([
+                    {
+                        'id': tc.id,
+                        'function': {
+                            'name': tc.function.name,
+                            'arguments': tc.function.arguments,
+                        },
+                    } for tc in tool_call_info.tool_calls
+                ])
+        except Exception as e:
+            logger.error(f'Failed to parse tool calls from Anthropic request. Exception: {e}.')
+
+    response = build_anthropic_response(
+        message_id=message_id,
+        model=model_name,
+        text=text,
+        finish_reason=final_res.finish_reason,
+        input_tokens=final_res.input_token_len,
+        output_tokens=final_res.generate_token_len,
+        tool_calls=tool_use_blocks,
+    )
+    return response.model_dump()
 
 
 @router.post('/generate', dependencies=[Depends(check_api_key)])
