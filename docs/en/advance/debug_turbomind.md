@@ -6,6 +6,28 @@ Turbomind is implemented in C++, which is not as easy to debug as Python. This d
 
 First, complete the local compilation according to the commands in [Install from source](../get_started/installation.md).
 
+### Release build with detached debug symbols
+
+By default, release packaging now strips `_turbomind`/`_xgrammar` and writes detached symbols to
+`build/debug_symbols/` during CMake build.
+
+If you need to control this behavior:
+
+```bash
+# Keep stripped release binaries and detached symbols (default in Release)
+export CMAKE_BUILD_TYPE=Release
+export CMAKE_ARGS="-DLMDEPLOY_SPLIT_DEBUG_INFO=ON -DLMDEPLOY_STRIP_BINARIES=ON"
+
+# Keep host debug symbols in detached files for coredump analysis
+# (default ON when LMDEPLOY_SPLIT_DEBUG_INFO=ON)
+# export CMAKE_ARGS="$CMAKE_ARGS -DLMDEPLOY_EMIT_RELEASE_DEBUG_INFO=ON"
+
+# Optional: keep CUDA source line mapping for profiler sessions
+# export CMAKE_ARGS="$CMAKE_ARGS -DLMDEPLOY_ENABLE_CUDA_LINE_INFO=ON"
+```
+
+If `objcopy`/`strip` are unavailable on your system, CMake will print a warning and skip this optimization.
+
 ## Configure Python debug environment
 
 Since many large companies currently use Centos 7 for online production environments, we will use Centos 7 as an example to illustrate the process.
@@ -131,6 +153,39 @@ Reading symbols from python3...
 
 python3 profile_restful_api.py --backend lmdeploy --dataset-path /workdir/ShareGPT_V3_unfiltered_cleaned_split.json --num_prompts 1
 ````
+
+## Analyze coredump with detached symbols
+
+For stripped release binaries, keep the matching `build/debug_symbols/*.debug` files from the same build.
+
+```bash
+# Enable core dump
+ulimit -c unlimited
+
+# Example: inspect the latest core
+gdb python3 /path/to/core
+```
+
+In gdb, point to detached symbols and verify build-id match:
+
+```gdb
+(gdb) set debug-file-directory /path/to/build/debug_symbols
+(gdb) info sharedlibrary _turbomind
+(gdb) bt
+```
+
+For address-level symbolization:
+
+```bash
+# Replace with your function address and matching .debug file
+eu-addr2line -f -e /path/to/build/debug_symbols/_turbomind.cpython-*.so.debug 0xADDRESS
+```
+
+### CI recommendation
+
+For each wheel build, archive `build/debug_symbols/` as a separate artifact (or a dedicated `-dbg` package) and
+keep it versioned with wheel commit SHA/build-id. This allows postmortem debugging without shipping full symbols
+inside runtime wheels.
 
 ## Using GDB
 

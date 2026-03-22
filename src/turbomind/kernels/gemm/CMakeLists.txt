@@ -31,7 +31,6 @@ add_library(gemm2
         kernel/sm90_64n32_8.cu
         cublas.cu
         moe_utils_v2.cu
-        test/test_utils.cu
 )
 
 target_link_libraries(gemm2 PRIVATE parser nvidia::cutlass::cutlass CUDA::cuda_driver)
@@ -39,18 +38,23 @@ target_link_libraries(gemm2 PRIVATE parser nvidia::cutlass::cutlass CUDA::cuda_d
 
 target_compile_definitions(gemm2 PRIVATE -DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED)
 
+set(_gemm_cuda_compile_options
+        -Xptxas=-v
+        --threads 16)
+if(LMDEPLOY_ENABLE_CUDA_LINE_INFO)
+        list(APPEND _gemm_cuda_compile_options --generate-line-info)
+endif()
 target_compile_options(gemm2 PRIVATE
-        $<$<COMPILE_LANGUAGE:CUDA>:
-                -Xptxas=-v
-                --generate-line-info
-                --threads 16>
-)
+        $<$<COMPILE_LANGUAGE:CUDA>:${_gemm_cuda_compile_options}>)
+unset(_gemm_cuda_compile_options)
 set_property(TARGET gemm2 PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET gemm2 PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 
 
 
 if (BUILD_TEST)
+        target_sources(gemm2 PRIVATE test/test_utils.cu)
+
         add_executable(test_gemm_v2
                 test/test_gemm_v2.cc
                 ../../models/llama/LlamaLinear.cu

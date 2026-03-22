@@ -36,6 +36,26 @@ option(BUILD_PY_FFI "Build python ffi" ON)
 option(BUILD_TEST "Build tests" OFF)
 option(SPARSITY_SUPPORT "Build project with Ampere sparsity feature support" OFF)
 option(BUILD_FAST_MATH "Build in fast math mode" ON)
+set(_lmdeploy_release_default OFF)
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+  set(_lmdeploy_release_default ON)
+endif()
+option(LMDEPLOY_STRIP_BINARIES "Strip TurboMind binaries after build (Linux only)." ${_lmdeploy_release_default})
+option(LMDEPLOY_SPLIT_DEBUG_INFO
+       "Generate detached debug symbol files for TurboMind binaries (Linux only)."
+       ${_lmdeploy_release_default})
+option(LMDEPLOY_ENABLE_CUDA_LINE_INFO
+       "Enable CUDA line info for profiling and source correlation."
+       OFF)
+set(_lmdeploy_release_debug_default OFF)
+if(LMDEPLOY_SPLIT_DEBUG_INFO)
+  set(_lmdeploy_release_debug_default ON)
+endif()
+option(LMDEPLOY_EMIT_RELEASE_DEBUG_INFO
+       "Emit host debug symbols in Release so detached debug files are useful."
+       ${_lmdeploy_release_debug_default})
+unset(_lmdeploy_release_debug_default)
+unset(_lmdeploy_release_default)
 
 include(FetchContent)
 
@@ -279,6 +299,12 @@ set(CMAKE_CXX_FLAGS_RELEASE         "${CMAKE_CXX_FLAGS_RELEASE}         -O3")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO  "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}  -O3")
 set(CMAKE_CUDA_FLAGS_RELEASE        "${CMAKE_CUDA_FLAGS_RELEASE}        -O3")
 set(CMAKE_CUDA_FLAGS_RELWITHDEBINFO "${CMAKE_CUDA_FLAGS_RELWITHDEBINFO} -O3")
+
+if(LMDEPLOY_EMIT_RELEASE_DEBUG_INFO)
+    set(CMAKE_C_FLAGS_RELEASE        "${CMAKE_C_FLAGS_RELEASE}        -g")
+    set(CMAKE_CXX_FLAGS_RELEASE      "${CMAKE_CXX_FLAGS_RELEASE}      -g")
+    set(CMAKE_CUDA_FLAGS_RELEASE     "${CMAKE_CUDA_FLAGS_RELEASE}     -g")
+endif()
 
 if(BUILD_FAST_MATH)
     set(CMAKE_CUDA_FLAGS_RELEASE        "${CMAKE_CUDA_FLAGS_RELEASE}        --use_fast_math")
