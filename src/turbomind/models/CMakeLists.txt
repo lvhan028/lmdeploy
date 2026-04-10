@@ -26,7 +26,7 @@ set_property(TARGET models PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 target_link_libraries(models PUBLIC
         generation
         core
-        gemm2
+        gemm2_link
         rms_norm
         CUDA::cublas
         CUDA::cudart

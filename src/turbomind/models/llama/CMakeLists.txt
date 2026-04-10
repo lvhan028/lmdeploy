@@ -31,7 +31,7 @@ set_property(TARGET Llama PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS  ON)
 target_link_libraries(Llama PUBLIC CUDA::cudart
         engine
         core
-        gemm2
+        gemm2_link
         CUDA::cublas
         nvidia::cutlass::cutlass
         rms_norm

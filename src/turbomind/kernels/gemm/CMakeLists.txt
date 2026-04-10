@@ -100,9 +100,28 @@ if(GEMM2_ARCH_90_ENABLED)
             --threads 16>
     )
     target_link_libraries(gemm2_sm90 PRIVATE parser nvidia::cutlass::cutlass CUDA::cuda_driver)
-    target_link_libraries(gemm2 PRIVATE gemm2_sm90)
 
     target_compile_definitions(gemm2 PRIVATE GEMM2_ARCH_90_ENABLED)
+endif()
+
+# Downstream must link this (not bare gemm2) when SM90 is split out: registry.cu in gemm2
+# references Registry::sm90_* in libgemm2_sm90.a while SM90 objects need make_2d_tma_desc
+# from libgemm2.a — circular; the linker must rescan both archives.
+add_library(gemm2_link INTERFACE)
+if(GEMM2_ARCH_90_ENABLED)
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.24")
+        target_link_libraries(gemm2_link INTERFACE "$<LINK_GROUP:RESCAN,gemm2_sm90,gemm2>")
+    else()
+        if(UNIX AND NOT APPLE)
+            target_link_options(gemm2_link INTERFACE "LINKER:--start-group")
+        endif()
+        target_link_libraries(gemm2_link INTERFACE gemm2_sm90 gemm2)
+        if(UNIX AND NOT APPLE)
+            target_link_options(gemm2_link INTERFACE "LINKER:--end-group")
+        endif()
+    endif()
+else()
+    target_link_libraries(gemm2_link INTERFACE gemm2)
 endif()
 
 if (BUILD_TEST)
@@ -111,10 +130,10 @@ if (BUILD_TEST)
                 ../../models/llama/LlamaLinear.cu
                 ../../models/llama/LlamaDenseWeight.cc
                 test/reference.cu)
-        target_link_libraries(test_gemm_v2 PRIVATE gemm2 core cublas quantization_kernels gpt_kernels)
+        target_link_libraries(test_gemm_v2 PRIVATE gemm2_link core cublas quantization_kernels gpt_kernels)
 
         add_executable(test_moe_utils test/test_moe_utils.cu test/test_utils.cu)
-        target_link_libraries(test_moe_utils PRIVATE gemm2 core cublas)
+        target_link_libraries(test_moe_utils PRIVATE gemm2_link core cublas)
 
         # if (NOT MSVC)
         #         FetchContent_Declare(
@@ -134,6 +153,6 @@ if (BUILD_TEST)
         #                 # test/test_utils.cu
         #                 test/quantization.cu
         #                 test/reference.cu)
-        #         target_link_libraries(gemm_bench PRIVATE gemm2 core nvbench::nvbench cublas)
+        #         target_link_libraries(gemm_bench PRIVATE gemm2_link core nvbench::nvbench cublas)
         # endif ()
 endif ()
