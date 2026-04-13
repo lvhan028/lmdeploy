@@ -400,6 +400,10 @@ async def chat_completions_v1(request: ChatCompletionRequest, raw_request: Reque
       0 and 1. Typical values are in the 0.01-0.2 range, comparably
       selective as setting `top_p` in the 0.99-0.8 range (use the
       opposite of normal `top_p` values)
+    - **repetition_ngram_size** (int): N-gram length for repetition early stop
+      (PyTorch engine). ``0`` disables.
+    - **repetition_ngram_threshold** (int): How many times that n-gram must
+      repeat to trigger early stop. ``0`` disables.
 
     Currently we do not support the following features:
 
@@ -472,6 +476,8 @@ async def chat_completions_v1(request: ChatCompletionRequest, raw_request: Reque
         migration_request=migration_request,
         with_cache=with_cache,
         preserve_cache=preserve_cache,
+        repetition_ngram_size=request.repetition_ngram_size,
+        repetition_ngram_threshold=request.repetition_ngram_threshold,
     )
 
     tools = None
@@ -759,6 +765,10 @@ async def completions_v1(request: CompletionRequest, raw_request: Request = None
       0 and 1. Typical values are in the 0.01-0.2 range, comparably
       selective as setting `top_p` in the 0.99-0.8 range (use the
       opposite of normal `top_p` values)
+    - **repetition_ngram_size** (int): N-gram length for repetition early stop
+      (PyTorch engine). ``0`` disables.
+    - **repetition_ngram_threshold** (int): How many times that n-gram must
+      repeat to trigger early stop. ``0`` disables.
 
     Currently we do not support the following features:
 
@@ -812,6 +822,8 @@ async def completions_v1(request: CompletionRequest, raw_request: Request = None
         migration_request=migration_request,
         with_cache=with_cache,
         preserve_cache=preserve_cache,
+        repetition_ngram_size=request.repetition_ngram_size,
+        repetition_ngram_threshold=request.repetition_ngram_threshold,
     )
     generators = []
     for prompt, session in zip(request.prompt, sessions):
