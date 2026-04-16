@@ -659,6 +659,10 @@ void invokeMoeGate_V2(int*         f2n,            // [e*n] -> n
             if (experts_per_token <= 8) {
                 return invoke(_Int<512>, _Int<8>, _Int<16>, _Int<4>);
             }
+            else if (experts_per_token <= 10) {
+                // e.g. DeepSeek-V3 style: 512 experts, top_k=10
+                return invoke(_Int<512>, _Int<10>, _Int<16>, _Int<4>);
+            }
         }
         return false;
     };
