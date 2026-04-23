@@ -398,6 +398,9 @@ class AsyncEngine:
                                                                         **kwargs)
             prompt = prompt_input.get('prompt')
             input_ids = prompt_input.get('input_ids')
+            if input_ids is None:
+                raise ValueError('get_prompt_input must return `input_ids`; '
+                                 '`prompt` may be absent for the new VLM preprocess path.')
             self.request_logger.log_inputs(session,
                                            prompt=prompt,
                                            prompt_token_ids=input_ids,

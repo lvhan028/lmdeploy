@@ -578,11 +578,14 @@ class HistoryMultiModals:
     def get_datas(self, start=0, end=-1):
         """Get multimodals from prompts position [start, end)."""
         outs: MultiModalInputs = dict()
-        test_range = range(start, end)
         for modal_type, modal_datas in self.multimodals.items():
             data = []
             for modal_data in modal_datas:
-                if (modal_data.start not in test_range or modal_data.end - 1 not in test_range):
+                md_start = modal_data.start
+                md_end = modal_data.end
+                if md_end is None:
+                    md_end = md_start
+                if not (md_start < end and md_end > start):
                     continue
                 data.append(modal_data)
             if len(data) > 0:

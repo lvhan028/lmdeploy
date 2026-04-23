@@ -121,12 +121,20 @@ class VisionModel(ABC):
         Example:
             input_ids = [1, 2, 3, 3, 3, 4, 3, 3]
             mm_token_id = 3
-            return result = [(2,4),(6,7)]
+            return result = [(2, 5), (6, 8)]  # half-open [start, end) indices
         """
+        if input_ids.numel() == 0:
+            return []
         mask = input_ids == mm_token_id
-        start_positions = (mask & ~torch.roll(mask, 1)).nonzero(as_tuple=True)[0]
-        end_positions = (mask & ~torch.roll(mask, -1)).nonzero(as_tuple=True)[0]
-        end_positions += 1 # convert to exclusive end index, compatible with legacy pytorch implementation
+        if not mask.any():
+            return []
+        # Use explicit boundaries; torch.roll would wrap and mis-detect a lone token
+        # or mm spans touching sequence ends.
+        prev_mask = torch.cat((mask.new_zeros(1), mask[:-1]))
+        next_mask = torch.cat((mask[1:], mask.new_zeros(1)))
+        start_positions = (mask & ~prev_mask).nonzero(as_tuple=True)[0]
+        end_positions = (mask & ~next_mask).nonzero(as_tuple=True)[0]
+        end_positions += 1  # convert to exclusive end index, compatible with legacy pytorch
         return list(zip(start_positions.tolist(), end_positions.tolist()))
 
     def get_override_size(self, processor, mm_processor_kwargs: dict[str, Any] | None = None, modality: str = ''):
