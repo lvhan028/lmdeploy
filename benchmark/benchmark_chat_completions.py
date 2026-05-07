@@ -436,6 +436,15 @@ def token_distribution_stats(values: Sequence[int]) -> list[tuple[str, float]]:
     ]
 
 
+TOKEN_STAT_COLORS = {
+    'mean': 'tab:red',
+    'p50': 'tab:orange',
+    'p75': 'tab:green',
+    'p90': 'tab:blue',
+    'p99': 'tab:purple',
+}
+
+
 def _group_key(trace: RequestTrace) -> tuple[str, str, float, int]:
     return (trace.dataset, trace.mode, trace.setting, trace.repeat)
 
@@ -656,7 +665,13 @@ def _plot_token_histogram(output_dir: Path,
     bins = min(max(int(math.sqrt(len(values))), 10), 80)
     ax.hist(values, bins=bins, alpha=0.85)
     for label, value in token_distribution_stats(values):
-        ax.axvline(value, linestyle='--', linewidth=1.2, label=f"{label}: {value:.1f}")
+        ax.axvline(
+            value,
+            color=TOKEN_STAT_COLORS[label],
+            linestyle='--',
+            linewidth=1.4,
+            label=f"{label}: {value:.1f}",
+        )
     ax.set_title(title)
     ax.set_xlabel('Tokens')
     ax.set_ylabel('Request count')
