@@ -8,6 +8,7 @@ CDF, box plot) plus summary statistics, rendered as PNGs embedded in an HTML rep
 from __future__ import annotations
 
 import argparse
+import csv
 import html
 import importlib
 import json
@@ -26,8 +27,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset-dir",
         type=Path,
-        default=Path("/workspace/lmdeploy/workspace/z2_oc_infer_message_dump/cv21-fullbench2-dump2"),
+        required=True,
         help="Directory containing eval JSONL files.",
+    )
+    parser.add_argument(
+        "--datasets",
+        nargs="+",
+        default=[],
+        help="Only process JSONL files whose stem contains one of these substrings (partial match).",
     )
     parser.add_argument(
         "--tokenizer",
@@ -70,6 +77,7 @@ def detect_category(filename: str) -> str:
 def count_tokens(messages: list[dict[str, Any]], tokenizer: Any) -> int:
     """Apply chat template and tokenize, return token count."""
     token_ids = tokenizer.apply_chat_template(messages, tokenize=True)
+    token_ids = token_ids['input_ids']
     return len(token_ids)
 
 
@@ -77,9 +85,14 @@ def collect_token_counts(
     dataset_dir: Path,
     tokenizer: Any,
     max_files: int | None = None,
+    datasets: Sequence[str] = (),
 ) -> tuple[dict[str, list[int]], list[int]]:
     """Scan all JSONL files and return per-category and global token counts."""
     files = sorted(dataset_dir.glob("*.jsonl"))
+    if datasets:
+        before = len(files)
+        files = [f for f in files if any(d in f.stem for d in datasets)]
+        print(f"Filter: {before} files -> {len(files)} files matching {datasets}")
     if max_files is not None:
         files = files[:max_files]
 
@@ -87,10 +100,17 @@ def collect_token_counts(
     global_counts: list[int] = []
     skipped = 0
 
-    for file_path in files:
+    try:
+        from tqdm import tqdm
+    except ImportError:
+        tqdm = None
+
+    iterator = tqdm(files, desc="Processing", unit="file") if tqdm else files
+    for file_path in iterator:
         category = detect_category(file_path.stem)
         if category not in category_counts:
             category_counts[category] = []
+        file_count = 0
         with file_path.open(encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
@@ -108,6 +128,11 @@ def collect_token_counts(
                     continue
                 category_counts[category].append(n_tokens)
                 global_counts.append(n_tokens)
+                file_count += 1
+        if tqdm:
+            iterator.set_postfix(file=file_path.name, msgs=file_count, refresh=False)
+        else:
+            print(f"  {file_path.name}: {file_count} messages")
 
     if skipped:
         print(f"Skipped {skipped} rows with missing/empty messages or tokenization errors.")
@@ -115,19 +140,19 @@ def collect_token_counts(
     return category_counts, global_counts
 
 
-def _percentile(values: list[int], q: float) -> float:
-    """Compute the q-th percentile (0-100) of a sorted list."""
-    if not values:
+def _percentile(sorted_values: list[int], q: float) -> float:
+    """Compute the q-th percentile (0-100) of an already-sorted list."""
+    if not sorted_values:
         return 0.0
-    ordered = sorted(values)
-    if len(ordered) == 1:
-        return float(ordered[0])
-    position = (len(ordered) - 1) * q / 100.0
+    n = len(sorted_values)
+    if n == 1:
+        return float(sorted_values[0])
+    position = (n - 1) * q / 100.0
     lower = math.floor(position)
     upper = math.ceil(position)
     if lower == upper:
-        return float(ordered[int(position)])
-    return float(ordered[lower] * (upper - position) + ordered[upper] * (position - lower))
+        return float(sorted_values[int(position)])
+    return float(sorted_values[lower] * (upper - position) + sorted_values[upper] * (position - lower))
 
 
 def compute_stats(token_counts: list[int]) -> dict[str, Any]:
@@ -137,16 +162,17 @@ def compute_stats(token_counts: list[int]) -> dict[str, Any]:
             "count": 0, "min": 0, "max": 0, "mean": 0.0,
             "p50": 0.0, "p75": 0.0, "p90": 0.0, "p95": 0.0, "p99": 0.0,
         }
+    ordered = sorted(token_counts)
     return {
         "count": len(token_counts),
-        "min": min(token_counts),
-        "max": max(token_counts),
+        "min": ordered[0],
+        "max": ordered[-1],
         "mean": round(statistics.mean(token_counts), 2),
-        "p50": round(_percentile(token_counts, 50), 2),
-        "p75": round(_percentile(token_counts, 75), 2),
-        "p90": round(_percentile(token_counts, 90), 2),
-        "p95": round(_percentile(token_counts, 95), 2),
-        "p99": round(_percentile(token_counts, 99), 2),
+        "p50": round(_percentile(ordered, 50), 2),
+        "p75": round(_percentile(ordered, 75), 2),
+        "p90": round(_percentile(ordered, 90), 2),
+        "p95": round(_percentile(ordered, 95), 2),
+        "p99": round(_percentile(ordered, 99), 2),
     }
 
 
@@ -168,10 +194,10 @@ def _matplotlib_pyplot():
         return None
 
 
-def _add_percentile_lines(ax, values: list[int], side: str = "right") -> None:
+def _add_percentile_lines(ax, sorted_values: list[int], side: str = "right") -> None:
     """Draw vertical dashed lines for p50, p75, p90, p99 with a legend."""
     for p in PERCENTILE_LINES:
-        val = _percentile(values, p)
+        val = _percentile(sorted_values, p)
         ax.axvline(val, color=PERCENTILE_COLORS[p], linestyle="--", linewidth=1.2,
                     label=f"p{p}={val:.0f}")
     if side == "right":
@@ -189,7 +215,8 @@ def _plot_global_histogram(
 
     fig, ax = plt.subplots(figsize=(10, 5.5))
     ax.hist(global_counts, bins=bins, alpha=0.75, color="#5C6BC0", edgecolor="white")
-    _add_percentile_lines(ax, global_counts)
+    sorted_global = sorted(global_counts)
+    _add_percentile_lines(ax, sorted_global)
     ax.set_title("Global Token Distribution (Histogram)")
     ax.set_xlabel("Token count")
     ax.set_ylabel("Number of messages")
@@ -214,7 +241,7 @@ def _plot_global_cdf(
 
     fig, ax = plt.subplots(figsize=(10, 5.5))
     ax.plot(sorted_counts, cdf_y, color="#5C6BC0", linewidth=1.5)
-    _add_percentile_lines(ax, global_counts, side="left")
+    _add_percentile_lines(ax, sorted_counts, side="left")
     ax.set_title("Global Token Distribution (CDF)")
     ax.set_xlabel("Token count")
     ax.set_ylabel("Cumulative proportion")
@@ -230,14 +257,14 @@ def _plot_global_cdf(
 CATEGORY_COLORS = [
     "#5C6BC0", "#EF5350", "#66BB6A", "#FFA726", "#AB47BC",
     "#26C6DA", "#8D6E63", "#78909C", "#EC407A", "#7E57C2",
-    "#29B6F6", "#9CCC65", "#FFCA28", "#FF7043", "#5C6BC0",
-    "#26A69A", "#42A5F5", "#D4E157", "#8D6E63", "#78909C",
+    "#29B6F6", "#9CCC65", "#FFCA28", "#FF7043", "#26A69A",
+    "#42A5F5", "#D4E157", "#8D6E63", "#5C6BC0", "#78909C",
 ]
 
 
 def _plot_category_histogram(
     output_dir: Path, category_counts: dict[str, list[int]],
-    global_counts: list[int], bins: int,
+    sorted_global: list[int], bins: int,
 ) -> Path | None:
     plt = _matplotlib_pyplot()
     if plt is None or not category_counts:
@@ -247,7 +274,7 @@ def _plot_category_histogram(
     for i, (cat, counts) in enumerate(sorted(category_counts.items())):
         color = CATEGORY_COLORS[i % len(CATEGORY_COLORS)]
         ax.hist(counts, bins=bins, alpha=0.4, label=cat, color=color, edgecolor="white")
-    _add_percentile_lines(ax, global_counts)
+    _add_percentile_lines(ax, sorted_global)
     ax.set_title("Per-Category Token Distribution (Histogram)")
     ax.set_xlabel("Token count")
     ax.set_ylabel("Number of messages")
@@ -262,7 +289,7 @@ def _plot_category_histogram(
 
 def _plot_category_cdf(
     output_dir: Path, category_counts: dict[str, list[int]],
-    global_counts: list[int],
+    sorted_global: list[int],
 ) -> Path | None:
     plt = _matplotlib_pyplot()
     if plt is None or not category_counts:
@@ -274,7 +301,7 @@ def _plot_category_cdf(
         n = len(sorted_c)
         color = CATEGORY_COLORS[i % len(CATEGORY_COLORS)]
         ax.plot(sorted_c, [j / n for j in range(1, n + 1)], label=cat, color=color, linewidth=1.2)
-    _add_percentile_lines(ax, global_counts, side="left")
+    _add_percentile_lines(ax, sorted_global, side="left")
     ax.set_title("Per-Category Token Distribution (CDF)")
     ax.set_xlabel("Token count")
     ax.set_ylabel("Cumulative proportion")
@@ -300,7 +327,7 @@ def _plot_category_boxplot(
     data = [counts for _, counts in sorted_cats]
 
     fig, ax = plt.subplots(figsize=(max(12, len(labels) * 0.5), 6))
-    ax.boxplot(data, labels=labels, showfliers=False, vert=True)
+    ax.boxplot(data, tick_labels=labels, showfliers=False, vert=True)
     ax.set_title("Per-Category Token Distribution (Box Plot)")
     ax.set_ylabel("Token count")
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right", fontsize="x-small")
@@ -314,7 +341,7 @@ def _plot_category_boxplot(
 
 def write_html_report(
     path: Path,
-    category_counts: dict[str, list[int]],
+    all_stats: Sequence[dict[str, Any]],
     global_counts: list[int],
     plot_paths: Sequence[Path],
     dataset_dir: str,
@@ -322,15 +349,6 @@ def write_html_report(
     bins: int,
 ) -> None:
     """Write an HTML report embedding plot PNGs and summary stats table."""
-    all_stats: list[dict[str, Any]] = []
-    for cat in sorted(category_counts):
-        stats = compute_stats(category_counts[cat])
-        stats["category"] = cat
-        all_stats.append(stats)
-    global_stats = compute_stats(global_counts)
-    global_stats["category"] = "GLOBAL"
-    all_stats.append(global_stats)
-
     headers = ["category", "count", "min", "max", "mean", "p50", "p75", "p90", "p95", "p99"]
     header_html = "".join(f"<th>{html.escape(h)}</th>" for h in headers)
     table_rows = []
@@ -385,7 +403,7 @@ def main() -> None:
 
     print(f"Scanning JSONL files in: {args.dataset_dir}")
     category_counts, global_counts = collect_token_counts(
-        args.dataset_dir, tokenizer, args.max_files,
+        args.dataset_dir, tokenizer, args.max_files, args.datasets,
     )
 
     output_dir: Path = args.output_dir
@@ -393,18 +411,22 @@ def main() -> None:
     plots_dir = output_dir / "plots"
     plots_dir.mkdir(exist_ok=True)
 
+    sorted_global = sorted(global_counts)
+
     print("Generating plots...")
-    plot_paths = [
-        p
-        for p in [
-            _plot_global_histogram(plots_dir, global_counts, args.bins),
-            _plot_global_cdf(plots_dir, global_counts),
-            _plot_category_histogram(plots_dir, category_counts, global_counts, args.bins),
-            _plot_category_cdf(plots_dir, category_counts, global_counts),
-            _plot_category_boxplot(plots_dir, category_counts),
-        ]
-        if p is not None
+    plot_steps = [
+        ("Global histogram", lambda: _plot_global_histogram(plots_dir, global_counts, args.bins)),
+        ("Global CDF", lambda: _plot_global_cdf(plots_dir, global_counts)),
+        ("Category histogram", lambda: _plot_category_histogram(plots_dir, category_counts, sorted_global, args.bins)),
+        ("Category CDF", lambda: _plot_category_cdf(plots_dir, category_counts, sorted_global)),
+        ("Category box plot", lambda: _plot_category_boxplot(plots_dir, category_counts)),
     ]
+    plot_paths = []
+    for idx, (label, fn) in enumerate(plot_steps, 1):
+        print(f"  [{idx}/{len(plot_steps)}] {label}...")
+        p = fn()
+        if p is not None:
+            plot_paths.append(p)
 
     print("Writing stats and report...")
     all_stats: list[dict[str, Any]] = []
@@ -420,9 +442,18 @@ def main() -> None:
         json.dumps(all_stats, indent=2, ensure_ascii=False), encoding="utf-8",
     )
 
+    all_stats.sort(key=lambda row: row["p99"])
+
+    csv_path = output_dir / "stats.csv"
+    csv_headers = ["category", "count", "min", "max", "mean", "p50", "p75", "p90", "p95", "p99"]
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=csv_headers)
+        writer.writeheader()
+        writer.writerows(all_stats)
+
     write_html_report(
         output_dir / "report.html",
-        category_counts,
+        all_stats,
         global_counts,
         plot_paths,
         str(args.dataset_dir),
@@ -432,6 +463,7 @@ def main() -> None:
 
     print(f"Report written to: {output_dir / 'report.html'}")
     print(f"Stats written to: {output_dir / 'stats.json'}")
+    print(f"CSV written to: {csv_path}")
 
 
 if __name__ == "__main__":
