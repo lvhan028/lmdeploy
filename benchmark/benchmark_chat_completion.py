@@ -342,6 +342,7 @@ async def closed_loop_runner(
     repeat: int,
     send_one: SendOne,
 ) -> list[RequestTrace]:
+    print(f"Running closed loop runner with concurrency {concurrency} requests {len(requests)} repeats {repeat}")
     queue: asyncio.Queue[BenchmarkRequest] = asyncio.Queue()
     for request in requests:
         queue.put_nowait(request)
@@ -371,6 +372,7 @@ async def request_rate_runner(
     send_one: SendOne,
     seed: int = 1,
 ) -> list[RequestTrace]:
+    print(f"Running request rate runner with request rate {request_rate} requests {len(requests)} repeats {repeat}")
     rng = random.Random(seed)
     tasks: list[asyncio.Task[RequestTrace]] = []
     for request in requests:
@@ -546,7 +548,78 @@ def _plot_metric(output_dir: Path, summaries: Sequence[dict[str, Any]], metric: 
     return path
 
 
-def _write_html_report(path: Path, summaries: Sequence[dict[str, Any]], plot_paths: Sequence[Path]) -> None:
+def _plot_token_distribution(output_dir: Path, traces: Sequence[RequestTrace]) -> list[Path]:
+    """Plot histograms of input (prompt) and output (completion) token distributions."""
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception:
+        return []
+
+    completed = [trace for trace in traces if trace.success and trace.usage_available]
+    if not completed:
+        return []
+
+    paths: list[Path] = []
+    for token_type, attr in [("input_tokens", "prompt_tokens"), ("output_tokens", "completion_tokens")]:
+        values = [getattr(trace, attr) for trace in completed if getattr(trace, attr) > 0]
+        if not values:
+            continue
+
+        fig, ax = plt.subplots(figsize=(9, 5))
+        ax.hist(values, bins=min(50, max(1, len(values) // 2)), edgecolor="black", alpha=0.7)
+        ax.set_title(f"Distribution of {token_type.replace('_', ' ')}")
+        ax.set_xlabel("Token count")
+        ax.set_ylabel("Number of requests")
+
+        mean_val = _mean(values)
+        p50 = percentile(values, 50)
+        p90 = percentile(values, 90)
+        p99 = percentile(values, 99)
+        ax.axvline(mean_val, color="red", linestyle="--", linewidth=1.2, label=f"mean={mean_val:.0f}")
+        ax.axvline(p50, color="orange", linestyle="--", linewidth=1.2, label=f"p50={p50:.0f}")
+        ax.axvline(p90, color="green", linestyle="--", linewidth=1.2, label=f"p90={p90:.0f}")
+        ax.axvline(p99, color="blue", linestyle="--", linewidth=1.2, label=f"p99={p99:.0f}")
+        ax.legend(fontsize="small")
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+
+        path = output_dir / f"{token_type}_distribution.png"
+        fig.savefig(path)
+        plt.close(fig)
+        paths.append(path)
+
+    if len([trace for trace in completed if trace.prompt_tokens > 0 and trace.completion_tokens > 0]) > 0:
+        fig, ax = plt.subplots(figsize=(9, 5))
+        ax.scatter(
+            [trace.prompt_tokens for trace in completed],
+            [trace.completion_tokens for trace in completed],
+            alpha=0.5,
+            s=12,
+        )
+        ax.set_title("Input vs output token count")
+        ax.set_xlabel("Input tokens")
+        ax.set_ylabel("Output tokens")
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+
+        path = output_dir / "token_scatter.png"
+        fig.savefig(path)
+        plt.close(fig)
+        paths.append(path)
+
+    return paths
+
+
+def _write_html_report(
+    path: Path,
+    summaries: Sequence[dict[str, Any]],
+    plot_paths: Sequence[Path],
+    token_dist_paths: Sequence[Path] = (),
+    token_stats: Sequence[dict[str, Any]] = (),
+) -> None:
     summary_json = json.dumps(list(summaries), ensure_ascii=False)
     headers = list(summaries[0].keys()) if summaries else []
     table_rows = []
@@ -554,11 +627,15 @@ def _write_html_report(path: Path, summaries: Sequence[dict[str, Any]], plot_pat
         cells = "".join(f"<td>{html.escape(str(summary.get(header, '')))}</td>" for header in headers)
         table_rows.append(f"<tr>{cells}</tr>")
     header_html = "".join(f"<th>{html.escape(header)}</th>" for header in headers)
-    plots_html = "\n".join(
-        f'<figure><img src="{html.escape(str(path.relative_to(path.parent.parent)))}" alt="{html.escape(path.stem)}">'
-        f"<figcaption>{html.escape(path.stem)}</figcaption></figure>"
-        for path in plot_paths
-    )
+    def _img_tag(p: Path) -> str:
+        return (
+            f'<figure><img src="{html.escape(str(p.relative_to(p.parent.parent)))}" alt="{html.escape(p.stem)}">'
+            f"<figcaption>{html.escape(p.stem)}</figcaption></figure>"
+        )
+
+    plots_html = "\n".join(_img_tag(p) for p in plot_paths)
+    token_dist_html = "\n".join(_img_tag(p) for p in token_dist_paths)
+    token_stats_json = json.dumps(list(token_stats), ensure_ascii=False)
     path.write_text(
         f"""<!doctype html>
 <html lang="en">
@@ -579,6 +656,9 @@ def _write_html_report(path: Path, summaries: Sequence[dict[str, Any]], plot_pat
   <h1>Chat Completions Benchmark Report</h1>
   <p>Interactive TTFT, ITL, TPOT, throughput, and success-rate views are generated from summary data.</p>
   <div id="interactive"></div>
+  <h2>Token Distribution</h2>
+  <div id="token-histograms"></div>
+  {token_dist_html}
   <h2>PNG Plots</h2>
   {plots_html}
   <h2>Summary</h2>
@@ -617,6 +697,35 @@ def _write_html_report(path: Path, summaries: Sequence[dict[str, Any]], plot_pat
       }});
       Plotly.newPlot(div, data, {{title, xaxis: {{title: "Concurrency / request rate"}}}}, {{responsive: true}});
     }}
+    const tokenStats = {token_stats_json};
+    const histRoot = document.getElementById("token-histograms");
+    for (const stat of tokenStats) {{
+      const div = document.createElement("div");
+      div.className = "chart";
+      histRoot.appendChild(div);
+      Plotly.newPlot(div, [{{x: stat.values, type: "histogram", nbinsx: 50, name: stat.label}}],
+        {{title: stat.label, xaxis: {{title: "Token count"}}, yaxis: {{title: "Count"}},
+         shapes: [
+           {{type: "line", x0: stat.mean, x1: stat.mean, y0: 0, y1: 1, yref: "paper",
+             line: {{color: "red", dash: "dash", width: 1.2}}}},
+           {{type: "line", x0: stat.p50, x1: stat.p50, y0: 0, y1: 1, yref: "paper",
+             line: {{color: "orange", dash: "dash", width: 1.2}}}},
+           {{type: "line", x0: stat.p90, x1: stat.p90, y0: 0, y1: 1, yref: "paper",
+             line: {{color: "green", dash: "dash", width: 1.2}}}},
+           {{type: "line", x0: stat.p99, x1: stat.p99, y0: 0, y1: 1, yref: "paper",
+             line: {{color: "blue", dash: "dash", width: 1.2}}}}
+         ],
+         annotations: [
+           {{x: stat.mean, y: 1, yref: "paper", text: "mean=" + Math.round(stat.mean), showarrow: false,
+             font: {{color: "red", size: 10}}}},
+           {{x: stat.p50, y: 0.95, yref: "paper", text: "p50=" + Math.round(stat.p50), showarrow: false,
+             font: {{color: "orange", size: 10}}}},
+           {{x: stat.p90, y: 0.9, yref: "paper", text: "p90=" + Math.round(stat.p90), showarrow: false,
+             font: {{color: "green", size: 10}}}},
+           {{x: stat.p99, y: 0.85, yref: "paper", text: "p99=" + Math.round(stat.p99), showarrow: false,
+             font: {{color: "blue", size: 10}}}}
+         ]}}, {{responsive: true}});
+    }}
   </script>
 </body>
 </html>
@@ -650,7 +759,23 @@ def write_report_artifacts(output_dir: str | Path, traces: Sequence[RequestTrace
         ]
         if path is not None
     ]
-    _write_html_report(output_dir / "report.html", summaries, plot_paths)
+    token_dist_paths = _plot_token_distribution(plots_dir, traces)
+
+    token_stats: list[dict[str, Any]] = []
+    completed_traces = [trace for trace in traces if trace.success and trace.usage_available]
+    for label, attr in [("Input tokens", "prompt_tokens"), ("Output tokens", "completion_tokens")]:
+        values = [getattr(trace, attr) for trace in completed_traces if getattr(trace, attr) > 0]
+        if values:
+            token_stats.append({
+                "label": label,
+                "values": values,
+                "mean": _mean(values),
+                "p50": percentile(values, 50),
+                "p90": percentile(values, 90),
+                "p99": percentile(values, 99),
+            })
+
+    _write_html_report(output_dir / "report.html", summaries, plot_paths, token_dist_paths, token_stats)
 
 
 async def _run_warmup(
