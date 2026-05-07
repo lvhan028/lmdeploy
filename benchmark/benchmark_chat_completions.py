@@ -121,6 +121,10 @@ def _discover_dataset_files(dataset_dir: Path | None, dataset_files: Sequence[Pa
     return sorted(Path(dataset_dir).glob('*.jsonl'))
 
 
+def _dataset_matches(dataset: str, selected: Sequence[str]) -> bool:
+    return any(dataset == item or dataset.startswith(item) for item in selected)
+
+
 def _normalize_row(row: dict[str, Any], dataset: str, row_index: int) -> BenchmarkRequest:
     messages = row.get('messages')
     if messages is None:
@@ -152,7 +156,7 @@ def load_requests(
     ``num_prompts`` is applied per dataset file so datasets with different sizes
     remain balanced in sweeps.
     """
-    selected = set(datasets or [])
+    selected = list(dict.fromkeys(datasets or []))
     files = _discover_dataset_files(
         Path(dataset_dir) if dataset_dir is not None else None,
         [Path(path) for path in dataset_files] if dataset_files is not None else None,
@@ -161,7 +165,7 @@ def load_requests(
     all_requests: list[BenchmarkRequest] = []
     for file_path in files:
         dataset = file_path.stem
-        if selected and dataset not in selected:
+        if selected and not _dataset_matches(dataset, selected):
             continue
         rows: list[BenchmarkRequest] = []
         with file_path.open(encoding='utf-8') as f:
@@ -847,7 +851,10 @@ def parse_args() -> argparse.Namespace:
         nargs='*',
         help='Explicit JSONL files to benchmark. Overrides dataset discovery from --dataset-dir.',
     )
-    parser.add_argument('--datasets', help='Comma-separated dataset names, matching JSONL filename stems.')
+    parser.add_argument(
+        '--datasets',
+        help='Comma-separated dataset names or filename-stem prefixes, e.g. "bbeh" matches bbeh*.jsonl.',
+    )
     parser.add_argument('--num-prompts', type=int, help='Maximum number of prompts sampled per dataset.')
     parser.add_argument('--shuffle', action='store_true', help='Shuffle each dataset before applying --num-prompts.')
     parser.add_argument('--seed', type=int, default=1, help='Random seed for shuffling and request-rate scheduling.')
