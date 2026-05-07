@@ -126,7 +126,7 @@ def _dataset_matches(dataset: str, selected: Sequence[str]) -> bool:
 
 
 def _normalize_row(row: dict[str, Any], dataset: str, row_index: int) -> BenchmarkRequest:
-    messages = row.get('messages')
+    messages = row.get('messages') or row.get('message')
     if messages is None:
         prompt = row.get('prompt')
         if prompt is None:
