@@ -273,6 +273,7 @@ async def request_chat_completion(
     max_completion_tokens: int | None,
     extra_body: dict[str, Any] | None,
     headers: dict[str, str] | None = None,
+    save_response_text: bool = False,
 ) -> RequestTrace:
     payload = build_payload(
         request=request,
@@ -312,9 +313,9 @@ async def request_chat_completion(
                         if trace.first_token_time is None:
                             trace.first_token_time = now
                         trace.chunk_times.append(now)
-                    if event.content:
+                    if save_response_text and event.content:
                         trace.generated_text += event.content
-                    if event.reasoning_content:
+                    if save_response_text and event.reasoning_content:
                         trace.reasoning_text += event.reasoning_content
                     if event.finish_reason is not None:
                         trace.finish_reason = event.finish_reason
@@ -699,8 +700,8 @@ def write_report_artifacts(
     plots_dir = output_dir / 'plots'
     plots_dir.mkdir(exist_ok=True)
 
-    trace_rows = [_trace_to_json(trace) for trace in traces]
     if save_raw_requests:
+        trace_rows = [_trace_to_json(trace) for trace in traces]
         _write_jsonl(output_dir / 'requests.jsonl', trace_rows)
         _write_requests_csv(output_dir / 'requests.csv', trace_rows)
         (output_dir / 'requests.json').write_text(
@@ -777,6 +778,7 @@ async def run_benchmark(args: argparse.Namespace) -> tuple[list[RequestTrace], l
                 max_completion_tokens=args.max_completion_tokens,
                 extra_body=extra_body,
                 headers=headers,
+                save_response_text=args.save_response_text,
             )
 
         all_traces: list[RequestTrace] = []
@@ -876,12 +878,6 @@ def parse_args() -> argparse.Namespace:
         help='Optional max_completion_tokens limit. If omitted, generation stops naturally at EOS.',
     )
     parser.add_argument(
-        '--stream-include-usage',
-        action='store_true',
-        default=True,
-        help='Accepted for command compatibility; streamed usage is always requested.',
-    )
-    parser.add_argument(
         '--extra-request-body',
         default='',
         help='JSON object merged into every chat request body for engine-specific options.',
@@ -890,6 +886,11 @@ def parse_args() -> argparse.Namespace:
         '--save-raw-requests',
         action='store_true',
         help='Save per-request raw traces as requests.jsonl, requests.csv, and requests.json.',
+    )
+    parser.add_argument(
+        '--save-response-text',
+        action='store_true',
+        help='Retain generated and reasoning text in memory and raw traces. Disabled by default to reduce memory use.',
     )
     parser.add_argument(
         '--output-dir',
