@@ -41,7 +41,7 @@ all plots and report. Data size (~260K integers) fits easily in memory.
 - `detect_category(filename)` — extract prefix before first `-` or `_` in filename stem
 - `count_tokens(messages, tokenizer)` — apply chat template + tokenize, return token count
 - `collect_token_counts(dataset_dir, tokenizer, max_files)` — scan all JSONL, return `{category: [counts]}` and global list
-- `compute_stats(token_counts)` — return dict with mean, median, p95, p99, min, max, count
+- `compute_stats(token_counts)` — return dict with mean, median, p50, p75, p90, p95, p99, min, max, count
 - `_plot_histogram()`, `_plot_cdf()`, `_plot_box()`, `_plot_global_histogram()`, `_plot_global_cdf()` — matplotlib plotting
 - `write_html_report()` — embed PNGs + stats table in HTML
 - `main()` — orchestrate
@@ -70,9 +70,9 @@ benchmark_outputs/token_dist_YYYYMMDD_HHMMSS/
 ## HTML Report
 
 - H1 title with dataset dir and tokenizer name
-- Global histogram + CDF at top
+- Global histogram + CDF at top (with vertical dashed lines for p50, p75, p90, p99 and a legend)
 - Per-category box plot
-- Per-category histograms + CDFs (sequential)
+- Per-category histogram + CDF (all categories overlaid on one plot with legend, same as box plot style; percentile lines for global distribution)
 - Summary stats table (one row per category + global row)
 - Same CSS style as existing `benchmark_chat_completions.py` report
 
