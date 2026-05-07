@@ -177,6 +177,7 @@ def load_requests(
 
     if not all_requests:
         raise ValueError("No benchmark requests were loaded.")
+    print(f"Loaded {len(all_requests)} requests")
     return all_requests
 
 
@@ -237,6 +238,28 @@ def _chat_completions_url(base_url: str, api_path: str) -> str:
     if not api_path.startswith("/"):
         api_path = f"/{api_path}"
     return f"{base_url}{api_path}"
+
+
+def _models_url(base_url: str) -> str:
+    base_url = base_url.rstrip("/")
+    if base_url.endswith("/v1"):
+        return f"{base_url}/models"
+    return f"{base_url}/v1/models"
+
+
+async def discover_model_id(session: Any, base_url: str, headers: dict[str, str] | None = None) -> str:
+    url = _models_url(base_url)
+    async with session.get(url, headers=headers) as response:
+        if response.status != 200:
+            raise RuntimeError(f"GET {url} failed: {response.status} {response.reason}: {await response.text()}")
+        payload = await response.json()
+    models = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(models, list) or not models:
+        raise RuntimeError(f"GET {url} returned no models: {payload!r}")
+    model_id = models[0].get("id") if isinstance(models[0], dict) else None
+    if not model_id:
+        raise RuntimeError(f"GET {url} returned invalid model entry: {models[0]!r}")
+    return str(model_id)
 
 
 async def request_chat_completion(
@@ -609,9 +632,9 @@ def write_report_artifacts(output_dir: str | Path, traces: Sequence[RequestTrace
     plots_dir.mkdir(exist_ok=True)
 
     trace_rows = [_trace_to_json(trace) for trace in traces]
-    _write_jsonl(output_dir / "requests.jsonl", trace_rows)
+    # _write_jsonl(output_dir / "requests.jsonl", trace_rows)
     _write_requests_csv(output_dir / "requests.csv", trace_rows)
-    (output_dir / "requests.json").write_text(json.dumps(trace_rows, indent=2, ensure_ascii=False), encoding="utf-8")
+    # (output_dir / "requests.json").write_text(json.dumps(trace_rows, indent=2, ensure_ascii=False), encoding="utf-8")
     _write_summary_csv(output_dir / "summary.csv", summaries)
     (output_dir / "summary.json").write_text(json.dumps(list(summaries), indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -663,13 +686,14 @@ async def run_benchmark(args: argparse.Namespace) -> tuple[list[RequestTrace], l
     extra_body = json.loads(args.extra_request_body) if args.extra_request_body else {}
 
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=None)) as session:
+        model_id = await discover_model_id(session, args.base_url, headers=headers)
 
         async def send_one(request: BenchmarkRequest, mode: str, setting: float, repeat: int) -> RequestTrace:
             return await request_chat_completion(
                 session=session,
                 request=request,
                 url=url,
-                model=args.model,
+                model=model_id,
                 mode=mode,
                 setting=setting,
                 repeat=repeat,
@@ -720,10 +744,9 @@ async def run_benchmark(args: argparse.Namespace) -> tuple[list[RequestTrace], l
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Benchmark /v1/chat/completions with eval JSONL datasets.")
-    parser.add_argument("--base-url", default="http://127.0.0.1:23333/v1")
+    parser.add_argument("--base-url", default="http://127.0.0.1:23333")
     parser.add_argument("--api-path", default="v1/chat/completions")
     parser.add_argument("--api-key", default="dummy")
-    parser.add_argument("--model", required=True)
     parser.add_argument("--dataset-dir", type=Path, default=Path("/workspace/lmdeploy/workspace/z1_oc_infer_message_dump"))
     parser.add_argument("--dataset-files", type=Path, nargs="*")
     parser.add_argument("--datasets", help="Comma-separated dataset names, matching JSONL filename stems.")
