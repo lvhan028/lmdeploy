@@ -408,6 +408,7 @@ def _latency_stats(prefix: str, values_s: Sequence[float]) -> dict[str, float]:
             f"min_{prefix}_ms": 0.0,
             f"max_{prefix}_ms": 0.0,
             f"p50_{prefix}_ms": 0.0,
+            f"p75_{prefix}_ms": 0.0,
             f"p95_{prefix}_ms": 0.0,
             f"p99_{prefix}_ms": 0.0,
         }
@@ -416,9 +417,23 @@ def _latency_stats(prefix: str, values_s: Sequence[float]) -> dict[str, float]:
         f"min_{prefix}_ms": min(values_ms),
         f"max_{prefix}_ms": max(values_ms),
         f"p50_{prefix}_ms": percentile(values_ms, 50),
+        f"p75_{prefix}_ms": percentile(values_ms, 75),
         f"p95_{prefix}_ms": percentile(values_ms, 95),
         f"p99_{prefix}_ms": percentile(values_ms, 99),
     }
+
+
+def token_distribution_stats(values: Sequence[int]) -> list[tuple[str, float]]:
+    if not values:
+        return []
+    float_values = [float(value) for value in values]
+    return [
+        ('mean', _mean(float_values)),
+        ('p50', percentile(float_values, 50)),
+        ('p75', percentile(float_values, 75)),
+        ('p90', percentile(float_values, 90)),
+        ('p99', percentile(float_values, 99)),
+    ]
 
 
 def _group_key(trace: RequestTrace) -> tuple[str, str, float, int]:
@@ -591,6 +606,7 @@ def _plot_latency_stats(
     stats = [
         (f"ave_{prefix}_ms", 'ave'),
         (f"p50_{prefix}_ms", 'p50'),
+        (f"p75_{prefix}_ms", 'p75'),
         (f"p95_{prefix}_ms", 'p95'),
         (f"p99_{prefix}_ms", 'p99'),
     ]
@@ -639,10 +655,13 @@ def _plot_token_histogram(output_dir: Path,
     fig, ax = plt.subplots(figsize=(8, 5))
     bins = min(max(int(math.sqrt(len(values))), 10), 80)
     ax.hist(values, bins=bins, alpha=0.85)
+    for label, value in token_distribution_stats(values):
+        ax.axvline(value, linestyle='--', linewidth=1.2, label=f"{label}: {value:.1f}")
     ax.set_title(title)
     ax.set_xlabel('Tokens')
     ax.set_ylabel('Request count')
     ax.grid(True, alpha=0.3)
+    ax.legend(fontsize='small')
     fig.tight_layout()
     path = output_dir / f"{token_field}_histogram.png"
     fig.savefig(path)
