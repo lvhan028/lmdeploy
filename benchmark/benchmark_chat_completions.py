@@ -167,18 +167,16 @@ def load_requests(
         dataset = file_path.stem
         if selected and not _dataset_matches(dataset, selected):
             continue
-        rows: list[BenchmarkRequest] = []
         with file_path.open(encoding='utf-8') as f:
             for row_index, line in enumerate(f):
                 line = line.strip()
                 if not line:
                     continue
-                rows.append(_normalize_row(json.loads(line), dataset, row_index))
-        if shuffle:
-            random.Random(seed).shuffle(rows)
-        if num_prompts is not None:
-            rows = rows[:num_prompts]
-        all_requests.extend(rows)
+                all_requests.append(_normalize_row(json.loads(line), dataset, row_index))
+    if shuffle:
+        random.Random(seed).shuffle(all_requests)
+    if num_prompts is not None:
+        all_requests = all_requests[:num_prompts]
 
     if not all_requests:
         raise ValueError('No benchmark requests were loaded.')
@@ -820,43 +818,49 @@ async def run_benchmark(args: argparse.Namespace) -> tuple[list[RequestTrace], l
             )
 
         all_traces: list[RequestTrace] = []
-        requests_by_dataset: dict[str, list[BenchmarkRequest]] = defaultdict(list)
-        for request in requests:
-            requests_by_dataset[request.dataset].append(request)
-        for dataset, dataset_requests in sorted(requests_by_dataset.items()):
-            print(f"Benchmarking dataset={dataset} requests={len(dataset_requests)}")
-            await _run_warmup(dataset_requests, args.warmup_requests, send_one)
-            for repeat in range(args.repeats):
-                if args.mode == 'concurrency':
-                    for concurrency in _parse_number_list(args.levels, as_int=True):
-                        all_traces.extend(
-                            await closed_loop_runner(
-                                dataset_requests,
-                                concurrency=int(concurrency),
-                                repeat=repeat,
-                                send_one=send_one,
-                            )
+        await _run_warmup(requests, args.warmup_requests, send_one)
+        for repeat in range(args.repeats):
+            if args.mode == 'concurrency':
+                for concurrency in _parse_number_list(args.levels, as_int=True):
+                    print(f"benchmark with {len(requests)} for case concurrency-{concurrency}...")
+                    all_traces.extend(
+                        await closed_loop_runner(
+                            requests,
+                            concurrency=int(concurrency),
+                            repeat=repeat,
+                            send_one=send_one,
                         )
-                elif args.mode == 'request-rate':
-                    for request_rate in _parse_number_list(args.levels, as_int=False):
-                        all_traces.extend(
-                            await request_rate_runner(
-                                dataset_requests,
-                                request_rate=float(request_rate),
-                                repeat=repeat,
-                                send_one=send_one,
-                                seed=args.seed + repeat,
-                            )
-                        )
+                    )
+                    print(f"write report for case concurrency-{concurrency}...")
+                    summaries = aggregate_traces(all_traces)
+                    write_report_artifacts(
+                        args.output_dir,
+                        all_traces,
+                        summaries,
+                        mode=args.mode,
+                        save_raw_requests=args.save_raw_requests,
+                    )
 
-    summaries = aggregate_traces(all_traces)
-    write_report_artifacts(
-        args.output_dir,
-        all_traces,
-        summaries,
-        mode=args.mode,
-        save_raw_requests=args.save_raw_requests,
-    )
+            elif args.mode == 'request-rate':
+                for request_rate in _parse_number_list(args.levels, as_int=False):
+                    all_traces.extend(
+                        await request_rate_runner(
+                            requests,
+                            request_rate=float(request_rate),
+                            repeat=repeat,
+                            send_one=send_one,
+                            seed=args.seed + repeat,
+                        )
+                    )
+                    summaries = aggregate_traces(all_traces)
+                    write_report_artifacts(
+                        args.output_dir,
+                        all_traces,
+                        summaries,
+                        mode=args.mode,
+                        save_raw_requests=args.save_raw_requests,
+                    )
+
     return all_traces, summaries
 
 
