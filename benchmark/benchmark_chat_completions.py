@@ -23,6 +23,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+try:
+    from tqdm import tqdm
+except Exception:  # noqa: BLE001 - tqdm is optional for CLI progress display.
+    tqdm = None
+
 
 @dataclass
 class BenchmarkRequest:
@@ -341,6 +346,7 @@ async def closed_loop_runner(
     concurrency: int,
     repeat: int,
     send_one: SendOne,
+    on_done: Callable[[RequestTrace], None] | None = None,
 ) -> list[RequestTrace]:
     queue: asyncio.Queue[BenchmarkRequest] = asyncio.Queue()
     for request in requests:
@@ -355,7 +361,10 @@ async def closed_loop_runner(
             except asyncio.QueueEmpty:
                 return
             try:
-                traces.append(await send_one(request, 'concurrency', float(concurrency), repeat))
+                trace = await send_one(request, 'concurrency', float(concurrency), repeat)
+                traces.append(trace)
+                if on_done is not None:
+                    on_done(trace)
             finally:
                 queue.task_done()
 
@@ -370,6 +379,7 @@ async def request_rate_runner(
     repeat: int,
     send_one: SendOne,
     seed: int = 1,
+    on_done: Callable[[RequestTrace], None] | None = None,
 ) -> list[RequestTrace]:
     rng = random.Random(seed)
     tasks: list[asyncio.Task[RequestTrace]] = []
@@ -377,7 +387,13 @@ async def request_rate_runner(
         tasks.append(asyncio.create_task(send_one(request, 'request-rate', float(request_rate), repeat)))
         if request_rate != float('inf'):
             await asyncio.sleep(rng.expovariate(request_rate))
-    return list(await asyncio.gather(*tasks))
+    traces: list[RequestTrace] = []
+    for task in asyncio.as_completed(tasks):
+        trace = await task
+        traces.append(trace)
+        if on_done is not None:
+            on_done(trace)
+    return traces
 
 
 def percentile(values: Sequence[float], q: float) -> float:
@@ -823,14 +839,38 @@ async def run_benchmark(args: argparse.Namespace) -> tuple[list[RequestTrace], l
             if args.mode == 'concurrency':
                 for concurrency in _parse_number_list(args.levels, as_int=True):
                     print(f"benchmark with {len(requests)} for case concurrency-{concurrency}...")
+                    completed_count = 0
+                    failed_count = 0
+                    pbar = None
+                    if tqdm is not None:
+                        pbar = tqdm(
+                            total=len(requests),
+                            desc=f"repeat-{repeat} concurrency-{int(concurrency)}",
+                            unit='req',
+                            dynamic_ncols=True,
+                        )
+
+                    def on_done(trace: RequestTrace) -> None:
+                        nonlocal completed_count, failed_count
+                        if trace.success:
+                            completed_count += 1
+                        else:
+                            failed_count += 1
+                        if pbar is not None:
+                            pbar.update(1)
+                            pbar.set_postfix(completed=completed_count, failed=failed_count)
+
                     all_traces.extend(
                         await closed_loop_runner(
                             requests,
                             concurrency=int(concurrency),
                             repeat=repeat,
                             send_one=send_one,
+                            on_done=on_done,
                         )
                     )
+                    if pbar is not None:
+                        pbar.close()
                     print(f"write report for case concurrency-{concurrency}...")
                     summaries = aggregate_traces(all_traces)
                     write_report_artifacts(
@@ -843,6 +883,27 @@ async def run_benchmark(args: argparse.Namespace) -> tuple[list[RequestTrace], l
 
             elif args.mode == 'request-rate':
                 for request_rate in _parse_number_list(args.levels, as_int=False):
+                    completed_count = 0
+                    failed_count = 0
+                    pbar = None
+                    if tqdm is not None:
+                        pbar = tqdm(
+                            total=len(requests),
+                            desc=f"repeat-{repeat} request-rate-{float(request_rate):g}",
+                            unit='req',
+                            dynamic_ncols=True,
+                        )
+
+                    def on_done(trace: RequestTrace) -> None:
+                        nonlocal completed_count, failed_count
+                        if trace.success:
+                            completed_count += 1
+                        else:
+                            failed_count += 1
+                        if pbar is not None:
+                            pbar.update(1)
+                            pbar.set_postfix(completed=completed_count, failed=failed_count)
+
                     all_traces.extend(
                         await request_rate_runner(
                             requests,
@@ -850,8 +911,11 @@ async def run_benchmark(args: argparse.Namespace) -> tuple[list[RequestTrace], l
                             repeat=repeat,
                             send_one=send_one,
                             seed=args.seed + repeat,
+                            on_done=on_done,
                         )
                     )
+                    if pbar is not None:
+                        pbar.close()
                     summaries = aggregate_traces(all_traces)
                     write_report_artifacts(
                         args.output_dir,
