@@ -126,8 +126,23 @@ def _discover_dataset_files(dataset_dir: Path | None, dataset_files: Sequence[Pa
     return sorted(Path(dataset_dir).glob('*.jsonl'))
 
 
-def _dataset_matches(dataset: str, selected: Sequence[str]) -> bool:
-    return any(dataset == item or dataset.startswith(item) for item in selected)
+def _dataset_longest_prefix_match(dataset: str, selected: Sequence[str]) -> str | None:
+    """Return the element of ``selected`` that matches ``dataset`` with longest
+    prefix.
+
+    A candidate ``item`` matches when ``dataset == item`` or ``dataset.startswith(item)``.
+    Among matches, the longest ``item`` by character length wins; ties keep the first in
+    ``selected`` order.
+    """
+    best: str | None = None
+    best_len = -1
+    for item in selected:
+        if dataset == item or dataset.lower().startswith(item.lower()):
+            n = len(item)
+            if n > best_len:
+                best = item
+                best_len = n
+    return best
 
 
 def _normalize_row(row: dict[str, Any], dataset: str, row_index: int) -> BenchmarkRequest:
@@ -168,10 +183,12 @@ def load_requests(
     )
 
     all_requests: list[BenchmarkRequest] = []
+    dataset = 'all'
     for file_path in files:
-        dataset = file_path.stem
-        if selected and not _dataset_matches(dataset, selected):
-            continue
+        if selected:
+            dataset = _dataset_longest_prefix_match(file_path.stem, selected)
+            if dataset is None:
+                continue
         with file_path.open(encoding='utf-8') as f:
             for row_index, line in enumerate(f):
                 line = line.strip()
@@ -182,7 +199,6 @@ def load_requests(
         random.Random(seed).shuffle(all_requests)
     if num_prompts is not None:
         all_requests = all_requests[:num_prompts]
-
     if not all_requests:
         raise ValueError('No benchmark requests were loaded.')
     return all_requests
