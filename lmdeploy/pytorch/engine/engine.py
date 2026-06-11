@@ -540,8 +540,15 @@ class Engine(EngineBase):
         await self.executor.sleep(level)
         logger.info('PyTorch engine entered sleep: level=%s, sleeping_tags=%s.', level, sorted(self._sleeping_tags))
 
-    def wakeup(self, tags: list[str] | None = None):
-        """Wakeup."""
+    def wakeup_resources(self, tags: list[str] | None = None) -> bool:
+        """Restore backend resources during wakeup.
+
+        Safe to call from a worker thread. Scheduling resume must be done via
+        ``resume_after_wakeup()`` on the engine event loop thread.
+
+        Returns:
+            bool: ``True`` when all sleep tags are cleared.
+        """
         wakeup_tags = tags
         logger.info('PyTorch engine wakeup requested: tags=%s, sleeping_tags=%s.',
                     wakeup_tags, sorted(self._sleeping_tags))
@@ -550,16 +557,24 @@ class Engine(EngineBase):
             self._sleeping_tags.clear()
         else:
             self._sleeping_tags.difference_update(wakeup_tags)
-        # The engine would resume only when all sleep tags have been cleared.
-        if not self._sleeping_tags:
-            # enable ADD_MESSAGE and ADD_SESSION
-            self._unblock_new_inputs()
-            if self._engine_loop is not None:
-                self._engine_loop.resume_from_sleep()
-            logger.info('PyTorch engine wakeup complete; inference requests are enabled.')
-        else:
+        if self._sleeping_tags:
             logger.info('PyTorch engine partial wakeup; blocked tags=%s.',
                         sorted(self._sleeping_tags))
+            return False
+        logger.info('PyTorch engine wakeup resources restored.')
+        return True
+
+    def resume_after_wakeup(self) -> None:
+        """Re-enable scheduling after wakeup resources are restored."""
+        self._unblock_new_inputs()
+        if self._engine_loop is not None:
+            self._engine_loop.resume_from_sleep()
+        logger.info('PyTorch engine wakeup complete; inference requests are enabled.')
+
+    def wakeup(self, tags: list[str] | None = None):
+        """Wakeup."""
+        if self.wakeup_resources(tags):
+            self.resume_after_wakeup()
 
     async def async_loop(self):
         engine_loop = None

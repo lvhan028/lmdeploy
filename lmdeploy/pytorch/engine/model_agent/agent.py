@@ -1224,6 +1224,16 @@ class BaseModelAgent:
         torch.cuda.empty_cache()
         self.state.to_sleep.clear()
 
+    def _notify_dp_wakeup(self) -> None:
+        """Notify dp ranks blocked in sleep that wakeup finished."""
+        if self.dist_config.dp <= 1:
+            return
+        task = self._background_task
+        if task is not None:
+            task.get_loop().call_soon_threadsafe(self.state.to_wakeup.set)
+        else:
+            self.state.to_wakeup.set()
+
     @torch.inference_mode()
     def wakeup(self, tags: list[str] | None = None):
         """Wakeup."""
@@ -1251,9 +1261,7 @@ class BaseModelAgent:
             self.build_cache_engine()
             self.warmup()
             self.state.is_sleeping = False
-            # wake up signal
-            if self.dist_config.dp > 1:
-                self.state.to_wakeup.set()
+            self._notify_dp_wakeup()
 
     def release(self):
         """release."""
