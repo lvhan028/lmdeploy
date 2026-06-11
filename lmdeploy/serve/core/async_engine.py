@@ -164,7 +164,7 @@ class AsyncEngine:
         # build stat loggers
         self._build_stat_loggers()
         self.epoch = 0
-        self._health_probe_task: asyncio.Task | None = None
+        self._health_probe_in_flight = False
         self._last_scheduler_tick: int | None = None
         self._last_scheduler_tick_time: float = time.monotonic()
         self._dispatched_start_time: float | None = None
@@ -288,36 +288,28 @@ class AsyncEngine:
                 message='Engine is sleeping.',
             )
 
-        if self._health_probe_task is not None:
-            if not self._health_probe_task.done():
-                return self._make_health_result(
-                    status='pending',
-                    message='Previous backend health probe is still pending.',
-                )
-            try:
-                self._health_probe_task.result()
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                pass
-            self._health_probe_task = None
+        if self._health_probe_in_flight:
+            return self._make_health_result(
+                status='pending',
+                message='Previous backend health probe is still pending.',
+            )
 
-        self._health_probe_task = asyncio.create_task(self.engine.get_health_status(), name='EngineHealthProbe')
+        self._health_probe_in_flight = True
         try:
-            backend_status = await asyncio.wait_for(asyncio.shield(self._health_probe_task), timeout=timeout)
+            backend_status = await asyncio.wait_for(self.engine.get_health_status(), timeout=timeout)
         except asyncio.TimeoutError:
             return self._make_health_result(
                 status='unhealthy',
                 message=f'Backend health probe timed out after {timeout:.1f}s.',
             )
         except Exception as e:
-            self._health_probe_task = None
             return self._make_health_result(
                 status='unhealthy',
                 message=f'Backend health probe failed: {e}',
             )
+        finally:
+            self._health_probe_in_flight = False
 
-        self._health_probe_task = None
         if not backend_status['alive']:
             return self._make_health_result(
                 status='unhealthy',
