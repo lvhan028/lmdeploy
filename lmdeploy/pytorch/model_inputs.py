@@ -229,6 +229,10 @@ class ModelInputs:
     target_hidden_states: torch.Tensor | None = None
     target_position_ids: torch.Tensor | None = None
     target_inputs_embeds: torch.Tensor | None = None
+    # Hidden-state positions requiring lm-head projection.
+    logits_indices: torch.LongTensor | None = None
+    # Number of compact logprob rows emitted for each sequence.
+    seq_logit_length: torch.LongTensor | None = None
     is_chunk: bool = False
     is_first_chunk: bool = False
     is_last_chunk: bool = False
@@ -255,6 +259,8 @@ class ModelInputs:
             history_lengths=self.history_lengths + step_seqlens,
             max_kv_seqlen=self.max_kv_seqlen + self.max_q_seqlen,
             sum_kv_seqlen=self.sum_kv_seqlen + self.max_q_seqlen * self.seq_length.numel(),
+            logits_indices=None,
+            seq_logit_length=None,
             mrope_pos_ids=mrope_pos_ids,
         )
 
@@ -344,7 +350,7 @@ class StepContext:
     state_caches: list | None = None
     state_offsets: torch.LongTensor | None = None
 
-    # named cache views for models with block_cache_specs / state_cache_specs
+    # named views for operator-owned block caches and configured state caches
     block_caches: Mapping[str, torch.Tensor] | None = None
     named_state_caches: Mapping[str, torch.Tensor] | None = None
 
@@ -391,11 +397,12 @@ class StepContext:
 
         # position ids
         attention_mask, position_ids = cls.get_mask_and_position_ids(inputs)
-        q_start_loc = q_seqlens.cumsum(0) - q_seqlens
+        q_start_loc = cls._get_q_start_loc(inputs)
 
         # seq_len + history_length
         kv_seqlens = q_seqlens + history_seqlens
-        kv_seqlens -= inputs.num_ignored_history
+        if cache_config.window_size > 0:
+            kv_seqlens -= inputs.num_ignored_history
 
         ret = StepContext(
             input_ids=inputs.input_ids,
@@ -441,6 +448,23 @@ class StepContext:
         if self.dp_meta is None:
             return self.is_decoding
         return self.dp_meta.dp_is_decoding
+
+    @staticmethod
+    def _get_q_start_loc(inputs: ModelInputs):
+        """Build query offsets, avoiding a scan for uniform layouts."""
+        q_seqlens = inputs.seq_length
+        num_tokens = inputs.input_ids.numel()
+        max_q_seqlen = inputs.max_q_seqlen
+        if max_q_seqlen * q_seqlens.numel() == num_tokens:
+            return torch.arange(
+                0,
+                num_tokens,
+                max_q_seqlen,
+                dtype=torch.long,
+                device=q_seqlens.device,
+            )
+
+        return q_seqlens.cumsum(0) - q_seqlens
 
     @classmethod
     def get_mask_and_position_ids(cls, inputs: ModelInputs):

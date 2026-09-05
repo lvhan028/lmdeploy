@@ -24,7 +24,7 @@ from lmdeploy.pytorch.nn.linear import (
     build_merged_colwise_linear,
     build_o_proj,
 )
-from lmdeploy.pytorch.nn.nsa import IndexerTopKFP8, get_dsa_indexer_k_cache
+from lmdeploy.pytorch.nn.nsa import IndexerTopKFP8
 from lmdeploy.pytorch.nn.rotary_embedding import get_rope_parameters, get_rope_theta
 from lmdeploy.pytorch.weight_loader.model_weight_loader import load_weight
 
@@ -147,8 +147,6 @@ class Indexer(nn.Module):
         super().__init__()
         quant_config = getattr(config, 'quantization_config', None)
         self.layer_idx = layer_idx
-        # MTP layer ids follow the backbone; their cache rows start from zero.
-        self.cache_layer_idx = layer_idx % config.num_hidden_layers
         # self.dim: int = 2048
         self.dim: int = config.hidden_size
         self.n_heads: int = config.index_n_heads
@@ -189,14 +187,20 @@ class Indexer(nn.Module):
         self.k_norm = LayerNorm(self.head_dim, device=device)
         self.softmax_scale = self.head_dim**-0.5
         self.apply_rotary_pos_emb = ApplyRotaryEmb()
-        self.indexer_topk = IndexerTopKFP8(self.index_topk, self.softmax_scale, block_size=128, fill=-1)
+        self.indexer_topk = IndexerTopKFP8(self.index_topk,
+                                           self.softmax_scale,
+                                           self.head_dim,
+                                           block_size=128,
+                                           fill=-1,
+                                           # MTP may reuse its first iteration's indices in later drafts.
+                                           allow_short_prefill_scoring_skip=layer_idx
+                                           < config.num_hidden_layers)
 
     def forward(self,
                 x: torch.Tensor,
                 qr: torch.Tensor,
                 freqs_cis: torch.Tensor,
                 attn_metadata: Any = None):
-        indexer_k_cache = get_dsa_indexer_k_cache(self.cache_layer_idx)
         q = self.wq_b(qr)
         q = q.unflatten(-1, (-1, self.head_dim))
         if self.use_fusion:
@@ -210,7 +214,6 @@ class Indexer(nn.Module):
                                                    self.k_norm.bias,
                                                    cos,
                                                    sin,
-                                                   indexer_k_cache,
                                                    norm_eps=self.k_norm.eps,
                                                    head_gate_scale=self.n_heads**-0.5,
                                                    rope_interleaved=False,
@@ -239,12 +242,17 @@ class Indexer(nn.Module):
 
         weights = self.weights_proj(x) * self.n_heads**-0.5
 
-        return self.indexer_topk(q[0], k[:, 0], weights[0], indexer_k_cache, attn_metadata=attn_metadata)
+        return self.indexer_topk(q[0], k[:, 0], weights[0], attn_metadata=attn_metadata)
 
 
 class DeepseekV32Attention(DeepseekV2Attention):
 
-    def __init__(self, config: Any, layer_idx: int, dtype: torch.dtype = None, device: torch.device = None):
+    def __init__(self,
+                 config: Any,
+                 layer_idx: int,
+                 dtype: torch.dtype = None,
+                 device: torch.device = None,
+                 all_reduce: bool = True):
         nn.Module.__init__(self)
         self.layer_idx = layer_idx
         quantization_config = getattr(config, 'quantization_config', None)
@@ -269,7 +277,6 @@ class DeepseekV32Attention(DeepseekV2Attention):
                 device=device,
                 is_tp=True,
                 quant_config=quantization_config,
-                dp_disable_tp=True,
             )
         else:
             self.fused_qkv_a_proj = build_merged_colwise_linear(
@@ -295,7 +302,6 @@ class DeepseekV32Attention(DeepseekV2Attention):
                 device=device,
                 is_tp=True,
                 quant_config=quantization_config,
-                dp_disable_tp=True,
             )
 
         if self.q_lora_rank is None:
@@ -337,7 +343,8 @@ class DeepseekV32Attention(DeepseekV2Attention):
                                   num_kv_heads=num_key_value_heads,
                                   v_head_size=config.kv_lora_rank,
                                   num_replicate_kv_heads=num_replicate_kv_heads,
-                                  use_flash_mla=use_flash_mla)
+                                  use_flash_mla=use_flash_mla,
+                                  mla_index_topk=config.index_topk)
 
         self.vc = DeepseekV2BMM(self.num_heads, config.kv_lora_rank, self.v_head_dim, dtype=dtype, device=device)
         self.o_proj = build_o_proj(
@@ -348,6 +355,7 @@ class DeepseekV32Attention(DeepseekV2Attention):
             device=device,
             is_tp=True,
             quant_config=quantization_config,
+            all_reduce=all_reduce,
         )
 
         self.indexer = self._build_indexer(config, layer_idx, dtype, device)
@@ -410,9 +418,7 @@ class DeepseekV32Attention(DeepseekV2Attention):
         attn_metadata: Any = None,
     ):
         """Rewrite of LlamaAttention.forward."""
-        dist_ctx = get_dist_manager().current_context()
-        tp_world_size = dist_ctx.dist_config.attn_tp
-        num_heads = self.num_heads // tp_world_size
+        num_heads = self.attn_fwd.num_heads
         nope_size = self.kv_lora_rank
         q_len = hidden_states.size(1)
 
@@ -459,28 +465,40 @@ class DeepseekV32DecoderLayer(DeepseekV2DecoderLayer):
         nn.Module.__init__(self)
         self.layer_idx = layer_idx
         quantization_config = None
+        # Row-wise TP outputs normally reduce inside their projections. An
+        # optimized communicator lets the following RMSNorm consume that
+        # reduction instead. Attention is consumed in this layer.
+        defer_attn_all_reduce = RMSNorm.can_handle_all_reduce('attn')
+        # MLP is consumed by the next target layer, so terminal and MTP blocks
+        # must still reduce their outputs.
+        defer_mlp_all_reduce = (layer_idx < config.num_hidden_layers - 1
+                                and RMSNorm.can_handle_all_reduce('mlp'))
 
         # build attention layer
-        self.self_attn = self.attention_cls(config, layer_idx, dtype=dtype, device=device)
+        self.self_attn = self.attention_cls(
+            config, layer_idx, dtype=dtype, device=device, all_reduce=not defer_attn_all_reduce)
 
         # mlp
-        self.mlp = (DeepseekV2MoE(config, layer_idx, dtype=dtype, device=device) if
+        self.mlp = (DeepseekV2MoE(
+            config, layer_idx, dtype=dtype, device=device, all_reduce=not defer_mlp_all_reduce) if
                     (config.n_routed_experts is not None and layer_idx >= config.first_k_dense_replace
-                     and layer_idx % config.moe_layer_freq == 0) else DeepseekV2MLP(config, dtype=dtype, device=device))
+                     and layer_idx % config.moe_layer_freq == 0) else DeepseekV2MLP(
+                         config, dtype=dtype, device=device, all_reduce=not defer_mlp_all_reduce))
 
         # build input layer norm
         self.input_layernorm = RMSNorm(config.hidden_size,
                                        config.rms_norm_eps,
                                        quant_config=quantization_config,
                                        dtype=torch.float32,
-                                       device=device)
+                                       device=device,
+                                       all_reduce_group='mlp')
 
         # build attention layer norm
         self.post_attention_layernorm = RMSNorm(config.hidden_size,
                                                 config.rms_norm_eps,
                                                 dtype=torch.float32,
-                                                device=device)
-
+                                                device=device,
+                                                all_reduce_group='attn')
 
 class DeepseekV32Model(DeepseekV2Model):
     decoder_layer_cls = DeepseekV32DecoderLayer

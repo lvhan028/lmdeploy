@@ -8,7 +8,6 @@ from os import getenv
 from typing import Any
 
 import torch
-import torch.nn.functional as F
 from torch import nn
 
 import lmdeploy.pytorch.distributed as dist
@@ -33,6 +32,7 @@ from lmdeploy.pytorch.nn.linear import (
     build_o_proj,
 )
 from lmdeploy.pytorch.nn.moe import MoeType, SoftmaxTopK, build_fused_moe
+from lmdeploy.pytorch.nn.moe.route import RouterGemm
 from lmdeploy.pytorch.nn.rotary_embedding import get_rope_parameters, get_rope_theta
 from lmdeploy.pytorch.weight_loader.model_weight_loader import load_weight
 
@@ -358,11 +358,6 @@ class DeepseekV2BMM(nn.Module):
 
     def _update_batch(self, batch: int):
         """Update out features."""
-        dist_config = get_dist_manager().current_config()
-        if dist_config.dp > 1:
-            # MLA Q projections use dp_disable_tp=True, so DP mode keeps
-            # q_nope full-head; absorb BMM weights must use the same layout.
-            return batch
         world_size, _ = get_tp_world_rank('attn')
         batch = batch // world_size
         return batch
@@ -373,10 +368,8 @@ class DeepseekV2BMM(nn.Module):
 
     def weight_loader(self, param: nn.Parameter, weight: torch.Tensor):
         """Weight loader."""
-        dist_config = get_dist_manager().current_config()
-        if dist_config.dp == 1:
-            world_size, rank = get_tp_world_rank('attn')
-            weight = weight.chunk(world_size, 0)[rank]
+        world_size, rank = get_tp_world_rank('attn')
+        weight = weight.chunk(world_size, 0)[rank]
         param.data.copy_(weight)
 
     def forward(self, x: torch.Tensor, output: torch.Tensor):
@@ -411,7 +404,6 @@ class DeepseekV2Attention(nn.Module):
                 device=device,
                 is_tp=True,
                 quant_config=quantization_config,
-                dp_disable_tp=True,
             )
         else:
             self.q_a_proj = build_colwise_linear(
@@ -436,7 +428,6 @@ class DeepseekV2Attention(nn.Module):
                 device=device,
                 is_tp=True,
                 quant_config=quantization_config,
-                dp_disable_tp=True,
             )
 
         self.kv_a_proj_with_mqa = build_colwise_linear(
@@ -537,12 +528,7 @@ class DeepseekV2Attention(nn.Module):
         attn_metadata: Any = None,
     ):
         """Rewrite of LlamaAttention.forward."""
-        dist_config = get_dist_manager().current_config()
-        if dist_config.dp > 1:
-            num_heads = self.num_heads
-        else:
-            world_size = dist_config.world_size
-            num_heads = self.num_heads // world_size
+        num_heads = self.attn_fwd.num_heads
         nope_size = self.kv_lora_rank
         q_len = hidden_states.size(1)
 
@@ -580,6 +566,16 @@ class DeepseekV2Attention(nn.Module):
         return attn_output
 
 
+def _get_moe_router_dtype(config: Any) -> torch.dtype | None:
+    router_dtype = getattr(config, 'moe_router_dtype', None)
+    if getattr(config, 'model_type', None) == 'glm_moe_dsa':
+        # Older GLM-5/5.2 configs require FP32 routing but do not expose moe_router_dtype.
+        return torch.float32
+    if router_dtype == 'float32':
+        return torch.float32
+    return None
+
+
 class MoEGate(nn.Module):
     """Deepseek Gate."""
 
@@ -605,7 +601,8 @@ class MoEGate(nn.Module):
         self.norm_topk_prob = config.norm_topk_prob
         self.gating_dim = config.hidden_size
         self.weight = nn.Parameter(
-            torch.empty((self.n_routed_experts, self.gating_dim), dtype=torch.float32, device=device))
+            torch.empty((self.n_routed_experts, self.gating_dim), dtype=dtype, device=device))
+        self.router_gemm = RouterGemm(out_dtype=_get_moe_router_dtype(config))
         if self.topk_method == 'noaux_tc':
             from lmdeploy.pytorch.nn.moe.route import NoauxTCRouter
             self.e_score_correction_bias = nn.Parameter(
@@ -645,7 +642,7 @@ class MoEGate(nn.Module):
 
     def forward(self, hidden_states: torch.Tensor, routed_experts: torch.Tensor = None):
         """forward."""
-        router_logits = F.linear(hidden_states.to(self.weight.dtype), self.weight)
+        router_logits = self.router_gemm(hidden_states, self.weight)
         if self.fake_eplb:
             # Forcefully manipulate router_logits to simulate expert load balancing (EPLB).
             # This is a benchmark-only hack to achieve optimal performance metrics.
@@ -685,7 +682,12 @@ class MoEGate(nn.Module):
 class DeepseekV2MoE(nn.Module):
     """Deepseek v2 MoE."""
 
-    def __init__(self, config: Any, layer_idx, dtype: torch.dtype = None, device: torch.device = None):
+    def __init__(self,
+                 config: Any,
+                 layer_idx,
+                 dtype: torch.dtype = None,
+                 device: torch.device = None,
+                 all_reduce: bool = True):
         super().__init__()
         self.layer_idx = layer_idx
         quantization_config = getattr(config, 'quantization_config', None)
@@ -737,7 +739,7 @@ class DeepseekV2MoE(nn.Module):
                 is_shared_expert=True,
             )
 
-        if dp == 1 and world_size > 1:
+        if all_reduce and dp == 1 and world_size > 1:
             self._all_reduce = True
         else:
             self._all_reduce = False
@@ -776,7 +778,8 @@ class DeepseekV2MLP(nn.Module):
                  intermediate_size: int = None,
                  dtype: torch.dtype = None,
                  device: torch.device = None,
-                 is_shared_expert: bool = False):
+                 is_shared_expert: bool = False,
+                 all_reduce: bool = True):
         super().__init__()
         quantization_config = getattr(config, 'quantization_config', None)
         if is_shared_expert:
@@ -787,12 +790,11 @@ class DeepseekV2MLP(nn.Module):
                 is_tp = True
                 all_reduce = False
             else:
-                # do not split weight on dp
-                # TODO: support dp+tp?
+                # TODO: support shared-expert TP under DP. Until shared-expert
+                # partials join the routed-expert reduction, keep the MLP replicated.
                 is_tp = False
                 all_reduce = False
         else:
-            all_reduce = True
             is_tp = True
 
         # gate up

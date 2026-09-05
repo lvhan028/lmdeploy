@@ -9,6 +9,8 @@ import torch
 
 from lmdeploy.pytorch.config import BackendConfig, CacheConfig, ModelConfig
 
+from .cache import CacheBackend
+
 
 class OpType(Enum):
     """Layer type enumerate."""
@@ -25,10 +27,12 @@ class OpType(Enum):
     LinearW8A8 = auto()
     RMSNormW8A8 = auto()
     MultinomialSampling = auto()
+    RejectionSampling = auto()
     LinearW4A16 = auto()
     SoftmaxTopK = auto()
     FusedMoE = auto()
     FusedMoEW8A8 = auto()
+    FusedMoEW4A16 = auto()
     FusedMoEStaticF8 = auto()
     LinearBlockedF8 = auto()
     LinearStaticF8 = auto()
@@ -40,9 +44,9 @@ class OpType(Enum):
     V4Compressor = auto()
     HcPrePost = auto()
     Embedding = auto()
-    CacheBlockCopy = auto()
 
     # MoE router
+    RouterGemm = auto()
     RouterNoauxTC = auto()
 
     # Gated Delta
@@ -104,6 +108,12 @@ class OpsBackend(ABC):
         raise NotImplementedError
 
     @classmethod
+    @abstractmethod
+    def get_cache_backend(cls) -> type[CacheBackend]:
+        """Get the cache backend provider."""
+        raise NotImplementedError
+
+    @classmethod
     def update_step_context(cls, step_context):
         """Update StepContext for inference.
 
@@ -116,6 +126,16 @@ class OpsBackend(ABC):
     def model_build_context(ctx_mgr):
         """Open an optional backend-owned scope around model construction."""
         yield
+
+    @classmethod
+    def build_communicator(cls, cpu_group, device_group, dist_config):
+        """Build a device communicator."""
+        from .communicator import build_communicator
+        return build_communicator(
+            cpu_group=cpu_group,
+            device_group=device_group,
+            dist_config=dist_config,
+        )
 
     @staticmethod
     def build_graph_runner(model: torch.nn.Module, model_config: ModelConfig, cache_config: CacheConfig,
